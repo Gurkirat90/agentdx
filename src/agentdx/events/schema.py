@@ -154,6 +154,16 @@ class FieldSpec:
     required: bool = True
     nullable: bool = False
     enum: frozenset[str] | None = None
+    set_valued: bool = False
+    """The array has no meaningful order, so the emitter must write it sorted.
+
+    Canonicalisation deliberately does **not** reorder arrays — a canonicaliser that
+    silently sorts hides a nondeterministic emitter, and the symptom surfaces much later as
+    an intermittent G3 failure that looks like a scheduler bug. Instead the structural
+    validator rejects an unsorted set-valued array with `E-EVENT-028`, at write time, naming
+    the field. Loud and correctly attributed beats silent and convenient.
+    """
+
     derived: bool = False
     doc: str = ""
 
@@ -564,7 +574,6 @@ PAYLOAD_SCHEMAS: Final[Mapping[EventType, tuple[FieldSpec, ...]]] = {
             derived=True,
             doc="Feeds the coordination-overhead bucket in PRD §16.2.",
         ),
-        FieldSpec("contended", FieldType.BOOL, Volatility.STABLE, derived=True),
     ),
     EventType.LOCK_RELEASE: (
         FieldSpec("lock_id", FieldType.STR, Volatility.STABLE, derived=True),
@@ -576,8 +585,10 @@ PAYLOAD_SCHEMAS: Final[Mapping[EventType, tuple[FieldSpec, ...]]] = {
             "participants",
             FieldType.STR_ARRAY,
             Volatility.STABLE,
+            set_valued=True,
             derived=True,
-            doc="Canonicalised sorted; a set-valued field must not carry iteration order.",
+            doc="Set-valued: the emitter must write it sorted (E-EVENT-028). Use "
+            "`agentdx.sorted_set()`, never bare set iteration (AGENTS.md §4.1).",
         ),
         FieldSpec(
             "phase",
@@ -594,8 +605,9 @@ PAYLOAD_SCHEMAS: Final[Mapping[EventType, tuple[FieldSpec, ...]]] = {
             "ready_task_ids",
             FieldType.STR_ARRAY,
             Volatility.STABLE,
+            set_valued=True,
             derived=True,
-            doc="Canonicalised sorted, for the same reason as barrier.participants.",
+            doc="Set-valued, same rule as barrier.participants (E-EVENT-028).",
         ),
         FieldSpec("reason", FieldType.STR, Volatility.STABLE, derived=True),
         FieldSpec("virtual_ready_ts_ms", FieldType.INT, Volatility.STABLE, derived=True),

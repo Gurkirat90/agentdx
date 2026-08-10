@@ -554,7 +554,6 @@ SPECS: list[Spec] = [
         {
             "lock_id": "lk_final",
             "wait_virtual_ms": 0,
-            "contended": False,
         },
     ),
     Spec(

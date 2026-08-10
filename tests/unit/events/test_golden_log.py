@@ -22,7 +22,7 @@ from agentdx.events.validators import validate_log
 
 GOLDEN = pathlib.Path(__file__).parents[2] / "golden" / "event_log_40.jsonl"
 
-GOLDEN_HASH = "blake2b:22f5704a60625ca349afc03936aee9fa6c1bc8b55162f00cd0629af55427a927"
+GOLDEN_HASH = "blake2b:cc612ca8fbb67b5ea9f682f5203bd8052d4b8dcadc11eb7a8570504e10a01f74"
 """Pinned canonical hash. Changing this line requires the instruction that changed the log."""
 
 

@@ -156,6 +156,23 @@ def _check_one_field(
         out.append(
             ValidationError("E-EVENT-005", f"{path}={value!r} is not one of: {allowed}", seq, path)
         )
+    if (
+        spec.set_valued
+        and isinstance(value, Sequence)
+        and not isinstance(value, str)
+        and list(value) != sorted(value)
+    ):
+        out.append(
+            ValidationError(
+                "E-EVENT-028",
+                f"{path} is set-valued and must be emitted sorted; got {list(value)!r}. "
+                f"The canonicaliser will not reorder it — silently sorting would hide a "
+                f"nondeterministic emitter and surface much later as an intermittent G3 "
+                f"failure. Use agentdx.sorted_set() at the emission site",
+                seq,
+                path,
+            )
+        )
     return out
 
 
@@ -171,7 +188,8 @@ def check_structural(event: Event) -> tuple[ValidationError, ...]:
     `E-EVENT-003` wrong type · `E-EVENT-004` null in a non-nullable field ·
     `E-EVENT-005` value outside a closed enum · `E-EVENT-006` unknown payload field ·
     `E-EVENT-008` schema_version mismatch · `E-EVENT-012` payload is not an object ·
-    `E-EVENT-013` float in the event log.
+    `E-EVENT-013` float in the event log ·
+    `E-EVENT-028` a set-valued array was not emitted sorted.
     """
     out: list[ValidationError] = []
     declared_seq: object = event.seq

@@ -125,6 +125,12 @@ you must not reuse it.
 order. The canonicaliser does not reorder data, because a canonicaliser that silently
 reorders cannot tell you that your emitter is nondeterministic.
 
+That obligation is not left to good intentions: such fields carry `set_valued=True` in the
+schema, and the structural validator rejects an unsorted one with `E-EVENT-028` at write
+time, naming the field. A port should implement the same check — without it, an emitter
+that iterates a hash set produces a log that validates cleanly and then fails gate G3
+intermittently, in a way that looks like a scheduler bug rather than an emitter bug.
+
 **Strings.** NFC-normalised. Escape exactly these and nothing else:
 
 | Character | Emitted as |
@@ -368,7 +374,6 @@ chain of a bundle produced on another machine and compare it.
 |---|---|---|---|---|
 | `lock_id` | `str` | yes | stable | *[derived — see §10]*  |
 | `wait_virtual_ms` | `int` | yes | stable | *[derived — see §10]* Feeds the coordination-overhead bucket in PRD §16.2. |
-| `contended` | `bool` | yes | stable | *[derived — see §10]*  |
 
 ### `lock_release`  ·  scope: span
 
@@ -382,7 +387,7 @@ chain of a bundle produced on another machine and compare it.
 | Field | Type | Required | Volatility | Notes |
 |---|---|---|---|---|
 | `barrier_id` | `str` | yes | stable | *[derived — see §10]*  |
-| `participants` | `str[]` | yes | stable | *[derived — see §10]* Canonicalised sorted; a set-valued field must not carry iteration order. |
+| `participants` | `str[]` | yes | stable | *[derived — see §10]* Set-valued: the emitter must write it sorted (E-EVENT-028). Use `agentdx.sorted_set()`, never bare set iteration (AGENTS.md §4.1).<br>**set-valued — emitter must sort (E-EVENT-028)** |
 | `phase` | `str` | yes | stable | *[derived — see §10]* <br>one of: `enter`, `release` |
 | `wait_virtual_ms` | `int` | yes | stable | *[derived — see §10]*  |
 
@@ -391,7 +396,7 @@ chain of a bundle produced on another machine and compare it.
 | Field | Type | Required | Volatility | Notes |
 |---|---|---|---|---|
 | `chosen_task_id` | `str` | yes | stable | *[derived — see §10]*  |
-| `ready_task_ids` | `str[]` | yes | stable | *[derived — see §10]* Canonicalised sorted, for the same reason as barrier.participants. |
+| `ready_task_ids` | `str[]` | yes | stable | *[derived — see §10]* Set-valued, same rule as barrier.participants (E-EVENT-028).<br>**set-valued — emitter must sort (E-EVENT-028)** |
 | `reason` | `str` | yes | stable | *[derived — see §10]*  |
 | `virtual_ready_ts_ms` | `int` | yes | stable | *[derived — see §10]*  |
 
@@ -491,6 +496,7 @@ renumbering one is a breaking change.
 | `E-EVENT-025` | semantic | Duplicate entry in `causal_parents` |
 | `E-EVENT-026` | semantic | Negative `seq`, step or timestamp |
 | `E-EVENT-027` | semantic | Vector clock regressed for the emitting slot |
+| `E-EVENT-028` | structural | A set-valued array was not emitted in sorted order |
 | `E-EVENT-040` | cross-event | A causal parent is not present in the log |
 | `E-EVENT-041` | cross-event | A causal parent's clock is ahead of its child's |
 | `E-EVENT-042` | cross-event | Fault taint was not inherited from a tainted parent |
@@ -533,7 +539,25 @@ PRD §9.5 specifies payloads for nine of the nineteen event types. The other ten
 reproducibility checklist), §11.5 (model identity), §12.2 (the fault catalogue) and §38 (the
 SQL DDL).
 
-**They need owner sign-off before the freeze — tracked as `CONTEXT.md` §10 Q-P02.1.** They are the part of this contract with the
+**Sign-off status: accepted 2026-08-10 with three amendments** (`CONTEXT.md` §10 Q-P02.1).
+The acceptance was delegated by the owner rather than produced by independent review — the
+same agent derived and accepted these schemas, which is recorded plainly here because the
+distinction matters if a later reader is deciding how much to trust them. The three
+amendments were:
+
+1. **`lock_acquire.contended` removed.** In a cooperative single-threaded scheduler
+   (PRD §10.2) it is exactly `wait_virtual_ms > 0`, so it was a second source of truth for
+   one fact — and a schema that can express `contended=false, wait_virtual_ms=50` is worse
+   than one that cannot. `wait_virtual_ms` stays: the log records only the *grant*, never
+   the attempt, so wait time is not otherwise derivable and PRD §16.2's coordination bucket
+   needs it.
+2. **`barrier.participants` and `schedule_decision.ready_task_ids` marked `set_valued`**,
+   with `E-EVENT-028` enforcing sorted emission. See §5.
+3. **`nondeterminism_warning.source` opened from a closed enum to a free string.** This
+   event type exists to record surprises; a closed enum would turn an unanticipated
+   determinism leak into `E-EVENT-005` and abort the run at precisely the moment the system
+   was trying to report something useful. Conventional values are still documented, and
+   closed enums remain correct for fields the system controls (`status`, `kind`, `phase`). They are the part of this contract with the
 weakest normative backing, and after the freeze a correction to any of them invalidates
 every run recorded in the meantime.
 

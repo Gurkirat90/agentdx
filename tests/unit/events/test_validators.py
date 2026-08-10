@@ -92,6 +92,29 @@ class TestStructural:
         broken = dataclasses.replace(event, payload={**event.payload, "params": {"factor": 1.5}})
         assert "E-EVENT-013" in codes(check_structural(broken))
 
+    def test_a_sorted_set_valued_array_passes(self) -> None:
+        """Set-valued arrays are legal when the emitter sorted them."""
+        event = factories.make_event(EventType.BARRIER)
+        ok = dataclasses.replace(
+            event, payload={**event.payload, "participants": ["coder", "planner", "reviewer"]}
+        )
+        assert "E-EVENT-028" not in codes(check_structural(ok))
+
+    def test_unsorted_set_valued_array_is_e_event_028(self) -> None:
+        """An emitter that iterated a hash set is caught here, not at gate G3 four weeks on."""
+        event = factories.make_event(EventType.BARRIER)
+        broken = dataclasses.replace(
+            event, payload={**event.payload, "participants": ["reviewer", "coder"]}
+        )
+        assert "E-EVENT-028" in codes(check_structural(broken))
+
+    def test_the_canonicaliser_does_not_paper_over_an_unsorted_array(self) -> None:
+        """Two orderings must hash differently — silently sorting would hide the emitter bug."""
+        event = factories.make_event(EventType.SCHEDULE_DECISION)
+        a = dataclasses.replace(event, payload={**event.payload, "ready_task_ids": ["a", "b"]})
+        b = dataclasses.replace(event, payload={**event.payload, "ready_task_ids": ["b", "a"]})
+        assert canonical_bytes(a) != canonical_bytes(b)
+
     def test_nested_float_is_found(self) -> None:
         """Nested float is found."""
         event = factories.make_event(EventType.FAULT_INJECTED)

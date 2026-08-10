@@ -10,8 +10,8 @@
 | Project | AgentDX — multi-agent coordination debugger, deterministic replay runtime, chaos harness |
 | Spec of record | `AgentDX-PRD-v2.md` (PRD & Technical Product Specification v2.0, 8 Aug 2026) |
 | Build window | 10 weeks, solo build |
-| Last updated | 2026-08-10 · P02 (`events/` BUILT; ADR-007 logged, D-08…09 declared, C-4…C-8 ruled) |
-| Current phase | Week 1 — `events/` BUILT, **schema not yet frozen** (Q-P02.1), awaiting P03 (`store/`) |
+| Last updated | 2026-08-10 · P02 (`events/` BUILT; ADR-007, D-08…09, C-4…C-8, Q-P02.1 accepted; OP-1/2/3 defined in §0) |
+| Current phase | Week 1 — `events/` BUILT, **schema not yet frozen** (awaiting P05 fixtures + green CI on 3.12), starting P03 (`store/`) |
 
 ---
 
@@ -25,6 +25,16 @@
    `AGENTS.md` (process) → §2 Invariants → §8 Decision Log (highest ADR number wins) → PRD → §5 Build State → anything else.
    A ledger ADR beats the PRD **only if** it names the PRD section it overrides in its `Overrides` column. Otherwise the PRD wins and the ledger is wrong — fix the ledger.
 6. Never silently resolve a conflict. PRD-internal contradictions go in §10 with a ruling; code-vs-PRD divergence goes in §9. Surface it in your response either way.
+
+**Operational prompts (`OP-n`) — defined here because §5, §11 and `AGENTS.md` §2 referenced them before anything said what they were.** They are not build prompts: none of them appears in the §5 roadmap, and any of them may run at any time.
+
+| ID | Purpose | Reads | Writes | Trigger |
+|---|---|---|---|---|
+| **OP-1** | **Re-plan.** Re-sequence remaining prompts, re-price the scope-cut order (§12), re-check the hard floor against elapsed time | `CONTEXT.md`, PRD §40 | §5, §7, §12 + an ADR if the sequence changes | Schedule slip, or a prompt discovering that a later one is now impossible |
+| **OP-2** | **Independent audit** of a `BUILT` module against its prompt's `DELIVERABLES`, the invariants it claimed to hold, and its acceptance gate. **Read-only: it changes no code.** It produces findings, and it must run each gate itself rather than trusting the build session's report | The module, its prompt, `CONTEXT.md`, the cited PRD sections | §5 `Status` → `VERIFIED` (or findings that trigger OP-3), §13 `Audit` column | A module reaches `BUILT`. Required before `VERIFIED`; **not** required before the next build prompt starts |
+| **OP-3** | **Repair.** Fixes a defect found by an §11 tripwire or an OP-2 finding. Scoped to the named defect; it is not a licence to refactor | The finding, the offending module | The module + a regression test that fails before the fix (`AGENTS.md` §5) + §9 if it declares a deviation | An §11 tripwire fires, or OP-2 reports a finding |
+
+**Best run by a different model than built the module** — an auditor that shares the builder's blind spots inherits them. `VERIFIED` means an OP-2 audit passed; a module the building session merely reports as working is `BUILT`, never `VERIFIED`.
 
 ---
 
@@ -134,7 +144,7 @@ Status: `NOT STARTED` · `IN PROGRESS` · `BUILT` (code + tests exist, self-repo
 | # | Module / surface | Prompt | Wk | Tier | Status | Gate | Verified on |
 |---|---|---|---|---|---|---|---|
 | 1 | Repo scaffold, toolchain, CI spine | P01 | 1 | — | BUILT | — | — |
-| 2 | `events/` — schema, validators, canonical form, writer | P02 | 1 | P0 | BUILT | schema freeze — **not yet frozen**, blocked on Q-P02.1 | — |
+| 2 | `events/` — schema, validators, canonical form, writer | P02 | 1 | P0 | BUILT | schema freeze — **not yet frozen**; Q-P02.1 accepted, awaiting P05 + green 3.12 CI | — (OP-2 not run; see §0) |
 | 3 | `store/` — SQLite, DuckDB, snapshots, bundles | P03 | 1 | P0 | NOT STARTED | — | — |
 | 4 | `sdk/` — decorators, LangGraph adapter, provider shims | P04 | 1 | P0 | NOT STARTED | FR-1 (overhead < 10 %, NFR-1) | — |
 | 5 | `fixtures/` — all three reference systems + golden corpus | P05 | 1 | P0 | NOT STARTED | FR-12 | — |
@@ -186,10 +196,10 @@ Criteria are short pointers; the binding text is PRD §44.1. Gates are met only 
 
 **Active prompt:** *(none)*
 **Next prompt:** P03 — `store/`: SQLite (WAL), DuckDB views, snapshots, bundles. It implements the `EventSink` protocol declared in `events/writer.py` and the `prev_hash`/`this_hash` columns ruled in C-4.
-**Blocked on:** **Q-P02.1 — owner sign-off of the ten derived payload schemas before the freeze.** Not blocking P03 (the sink protocol is stable either way); blocking the freeze itself.
+**Blocked on:** nothing. Q-P02.1 is accepted (with three amendments, §10). The freeze still waits on P05 and on a green `just ci` under Python 3.12.
 **Week (roadmap):** 1 of 10
 
-**Schema-freeze checklist (43.1.5, end of week 1):** ① Q-P02.1 signed off · ② P05 fixtures prove the schema sufficient against all three reference systems · ③ `just ci` green on 3.12. ① and ③ are outstanding.
+**Schema-freeze checklist (43.1.5, end of week 1):** ① ~~Q-P02.1 signed off~~ **done** · ② P05 fixtures prove the schema sufficient against all three reference systems — **outstanding** · ③ `just ci` green on Python 3.12 — **outstanding**. Recommended but not blocking: an OP-2 audit of `events/` once ② lands, re-examining the Q-P02.1 schemas, which were accepted by delegation rather than independent review.
 
 ---
 
@@ -245,9 +255,11 @@ Anything the code does that the PRD does not say, or says differently. **An unde
 | Q-43.2.6 | Verdict weights in `verdict_rules.toml` | §18.2 defaults, tuned against fixtures, version any change | Week 6 | OPEN |
 | Q-43.2.7 | Is `state_read` capture sampled in lightweight mode? | Full capture by default | Week 3 | OPEN |
 | Q-43.2.8 | Bundle format | zip | Week 9 | OPEN |
-| **Q-P02.1** | **PRD §9.5 specifies payloads for 9 of the 19 event types. The other 10 were derived at P02 — do they stand?** (`run_start`, `run_end`, `fault_effect`, `lock_acquire`, `lock_release`, `barrier`, `schedule_decision`, `instrumentation_gap`, `nondeterminism_warning`, `assertion_result`) | Adopt the P02 derivation: every field cites its source (§9.3, §10.7, §10.10, §11.5, §12.2, §38) and is marked `derived=True` in `schema.py`, tabulated in `docs/event-schema.md` §7 and §10 | **Week 1 — before the freeze** | **OPEN — blocks the schema freeze.** Deriving `run_end` is what surfaced C-7, so the review is not a formality |
+| **Q-P02.1** | **PRD §9.5 specifies payloads for 9 of the 19 event types. The other 10 were derived at P02 — do they stand?** | Adopt the P02 derivation; every field cites its source and is marked `derived=True` in `schema.py` | Week 1 — before the freeze | **Accepted 2026-08-10 with three amendments** (see below). ⚠️ **Accepted on owner delegation, not independent review** — the same agent derived and accepted these schemas. Re-examining them is the highest-value thing an OP-2 audit of `events/` can do |
 
-Q-P02.1 blocks the week-1 schema freeze. The rest do not block week-1 work.
+**Q-P02.1 amendments, applied 2026-08-10.** ① `lock_acquire.contended` **removed** — under the cooperative single-threaded scheduler (PRD §10.2) it is exactly `wait_virtual_ms > 0`, so it was a second source of truth for one fact, and a schema that can express `contended=false, wait_virtual_ms=50` is worse than one that cannot. `wait_virtual_ms` stays: the log records only the grant, never the attempt, so wait time is not otherwise derivable and PRD §16.2's coordination bucket needs it. ② `barrier.participants` and `schedule_decision.ready_task_ids` marked **`set_valued`**, with new code **`E-EVENT-028`** rejecting unsorted emission at write time — canonicalisation still refuses to reorder (that would hide a nondeterministic emitter), but the emitter now fails loudly and correctly attributed instead of surfacing as an intermittent G3 failure in week 2. ③ `nondeterminism_warning.source` **opened from a closed enum to a free string** — that event type exists to record surprises, and a closed enum would turn an unanticipated leak into `E-EVENT-005` and abort the run at the exact moment the system was trying to report something useful.
+
+**The freeze is no longer blocked by Q-P02.1.** It remains blocked by the P05 fixtures (ADR-001: fixtures are the only realistic consumers that can prove the schema *sufficient* before the freeze) and by a green `just ci` on Python 3.12. No other open question blocks week-1 work.
 
 **Known PRD-internal conflicts and their rulings.** Recorded so they are not re-litigated every session. A ruling here is binding until an ADR changes it.
 
