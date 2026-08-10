@@ -23,7 +23,7 @@ If `CONTEXT.md` and the PRD disagree, follow the precedence rule in `CONTEXT.md`
 
 - Build **only** what the prompt's `DELIVERABLES` names. Touching an unlisted file is a scope violation — surface it instead.
 - Do not refactor code from a previous prompt. If it is wrong, say so and stop; repair happens through OP-3, not opportunistically.
-- **Dependencies:** the permitted set is `CONTEXT.md` §3 plus PRD §24.6 and §25. Anything outside it — a new library, a new dev tool, a new CDN import — requires an ADR in `CONTEXT.md` §8 *before* it enters `pyproject.toml` or `package.json`. Ask first, always.
+- **Dependencies:** the permitted set is `CONTEXT.md` §3 plus PRD §24.6 and PRD §25. Anything outside it — a new library, a new dev tool, a new CDN import — requires an ADR in `CONTEXT.md` §8 *before* it enters `pyproject.toml` or `package.json`. Ask first, always.
 - Do not add "nice to have" features, extra endpoints, extra CLI flags, or speculative abstraction layers. The PRD is complete; extra surface area is a defect.
 - Respect the priority tiers in `CONTEXT.md` §5. Do not build a P1 or P2 item early because it is interesting — FR-6, FR-9, FR-11b, OTel export and the remaining six fault types are all cut-safe and all out of the hard floor.
 - No placeholder implementations, `pass`, `TODO`, mocked returns, or stubbed logic presented as done. If something cannot be completed, it is reported as **NOT DONE**, not shipped as a stub.

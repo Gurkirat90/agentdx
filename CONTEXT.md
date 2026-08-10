@@ -48,7 +48,7 @@ Admission test: violating it invalidates the product thesis (§1) or a named acc
 |---|---|---|
 | **I1** | **Determinism.** Same seed + same cache + same scenario → byte-identical *canonical projection* (PRD §10.7) of the event log. 100/100 replays, ≥10 in fresh processes. | Gate G3, `tests/determinism/` |
 | **I2** | **The event log is append-only and immutable.** Nothing edits or deletes an event after write. Analysis never mutates. | SQLite triggers in `store/sqlite.py` + kill-test suite |
-| **I3** | **Analysis is pure.** `agentdx.analysis.*` must not import `agentdx.runtime.*` or `agentdx.sdk.*`. Sole exception: `analysis.baseline`, behind an injected `BaselineExecutor` protocol (PRD §24.3). | import-linter in CI |
+| **I3** | **Analysis is pure.** `agentdx.analysis.*` must not import `agentdx.runtime.*` or `agentdx.sdk.*` — **no module is exempt, `analysis.baseline` included.** Baseline is the one analyser that must *execute* a run, and it does so via a `BaselineExecutor` protocol injected by the caller: the protocol type is declared in `analysis`, the implementation is constructed in `cli`. Injection is the mechanism that **avoids** the import; it is not a licence to import (PRD §24.3, "rather than importing the runtime directly"). | import-linter in CI, with **no allowlist entry** for `analysis.baseline` |
 | **I4** | **Zero false positives on the healthy fixture.** `research_fanout` yields an empty race-findings set across all 100 determinism replays **and** the k=2 exploration frontier. A tool that reports races in correct code is worse than no tool. | Gate G2, `tests/false_positives/` — including its own k=2 harness, which is P0 and independent of FR-6 (ADR-002) |
 | **I5** | **Race precision = 1.0** on the labelled benchmark set. Recall may be < 1.0 and is reported honestly. Precision is never traded for recall. | PRD §34.3 benchmark, `bench/results/` |
 | **I6** | **Every verdict, finding and scorecard line carries evidence** = concrete event `seq` references. An empty evidence array fails schema validation and cannot be rendered. | Verdict schema (PRD §18.4) |
@@ -89,7 +89,7 @@ Admission test: violating it invalidates the product thesis (§1) or a named acc
 | Platforms | macOS (Apple silicon + Intel) and Linux x86_64/arm64, Python 3.12+. **Windows unsupported in v1** |
 | Design tokens | `--navy-900 #0A2947`, `--cream #F3E4C9`, `--sage #D3D4C0`, `--clay #8B5E3C` + derived status tokens (PRD §29.1). Mono face with tabular numerals for all numerics. `--sage-dim` is never body text |
 
-**Dependency rule:** the stack above plus PRD §24.6 and §25 is the complete permitted dependency set. Anything else requires an ADR before it enters `pyproject.toml` or `package.json`.
+**Dependency rule:** the stack above plus PRD §24.6 and PRD §25 is the complete permitted dependency set. Anything else requires an ADR before it enters `pyproject.toml` or `package.json`.
 
 ---
 
@@ -283,6 +283,7 @@ Older entries roll into `docs/journal/YYYY-WW.md` when this section exceeds 15 r
 
 | Date | Prompt | Model | Outcome | Files touched | Audit |
 |---|---|---|---|---|---|
+| 2026-08-10 | P00d | Gemini (cold read) | **Ledger sufficiency test, 8 questions, CONTEXT.md alone: 7/8.** Q6 failed — I3's "sole exception" wording was read as permission for `analysis.baseline` to import `runtime`, the opposite of PRD §24.3. I3 rewritten; no allowlist entry permitted in the import-linter config. Also fixed: bare `§25` read as a CONTEXT ref, now `PRD §25` | `CONTEXT.md`, `AGENTS.md` | this row *is* the audit |
 | 2026-08-10 | P00c | Claude Opus 5 | Owner decisions applied: C-2 confirmed and closed; C-3 resolved by ADR-002 (k=2 harness split out of FR-6, made P0 at P12); §5 row 12b added | `CONTEXT.md` | pending |
 | 2026-08-10 | P00b | Claude Opus 5 | Governance validation pass: 9 mismatches corrected, I13 added, ADR-001 logged, C-1…C-3 recorded, `AGENTS.md` §4/§2/§10 made enforceable | `CONTEXT.md`, `AGENTS.md` | pending |
 | 2026-08-08 | P00 | — | Ledger seeded from PRD v2.0 | `CONTEXT.md`, `AGENTS.md` | n/a |
