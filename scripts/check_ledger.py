@@ -26,11 +26,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LEDGER = REPO_ROOT / "CONTEXT.md"
 MAX_LINES = 500
 
-# TODO(remote): AGENTS.md §10 specifies `origin/main` as the diff base. There is no remote
-# yet, so the base is HEAD — which checks the working tree against the last commit. Switch
-# DIFF_BASE to "origin/main" the moment a remote exists, otherwise a PR can delete a row in
-# one commit and this check will happily compare against that commit.
-DIFF_BASE = "HEAD"
+# AGENTS.md §10: the diff base is `origin/main`, not HEAD. Against HEAD the check is
+# theatre — a commit that deletes a row becomes the base it is compared against, and passes.
+# Against the remote branch, getting away with a deletion requires a force-push.
+#
+# Consequence: the check is only as fresh as your last fetch. CI is fine (actions/checkout
+# with fetch-depth: 0 fetches the ref); locally, run `git fetch origin` if you have been away.
+DIFF_BASE = "origin/main"
 
 # The two append-only sections, by their CONTEXT.md heading prefix.
 GUARDED_SECTIONS = ("## 8.", "## 9.")
@@ -39,11 +41,30 @@ ADR_PATTERN = re.compile(r"\bADR-(\d{3})\b")
 EXIT_VIOLATION = 2
 
 
-def _read_at_base(path: str) -> str | None:
-    """Return the contents of ``path`` at the diff base, or None if it does not exist there.
+def _base_ref_exists() -> bool:
+    """Return whether the diff base resolves to a commit in this clone.
 
-    Guarantees: never raises on a missing file or an unborn branch; those are reported as
-    None so a first commit is not treated as a deletion of everything.
+    Guarantees: never raises. A False here is a hard failure, not a skip — an
+    unresolvable base is indistinguishable from an unenforced check, and silently
+    passing when the base cannot be found is how this gate would quietly die.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{DIFF_BASE}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _read_at_base(path: str) -> str | None:
+    """Return the contents of ``path`` at the diff base, or None if absent at that commit.
+
+    Guarantees: never raises on a missing file; that is reported as None so the first
+    commit to introduce a file is not treated as a deletion of everything in it. Callers
+    must check ``_base_ref_exists()`` first — this function cannot tell a missing file
+    from a missing ref.
     """
     result = subprocess.run(
         ["git", "show", f"{DIFF_BASE}:{path}"],
@@ -158,11 +179,21 @@ def main() -> int:
     head_text = LEDGER.read_text(encoding="utf-8")
     problems: list[str] = []
 
+    if not _base_ref_exists():
+        print(
+            f"check-ledger: FAILED — cannot resolve '{DIFF_BASE}'.\n"
+            f"  The append-only check has nothing to compare against, so it is not running.\n"
+            f"  Run `git fetch origin`, or if the remote is genuinely gone, say so in an ADR "
+            f"rather than letting this gate pass unenforced.",
+            file=sys.stderr,
+        )
+        return EXIT_VIOLATION
+
     base_text = _read_at_base("CONTEXT.md")
     if base_text is None:
         print(
             f"check-ledger: CONTEXT.md does not exist at {DIFF_BASE}; "
-            f"skipping the append-only comparison (first commit)."
+            f"skipping the append-only comparison (file is new on this branch)."
         )
     else:
         problems += _check_append_only(base_text, head_text)
