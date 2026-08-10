@@ -1,0 +1,175 @@
+; AgentDX layer contract, transcribed from CONTEXT.md §4 (PRD §24.3).
+;
+; The §4 table is the source of truth; this file is its machine-readable form, one contract
+; per row, in table order. Wired at P01 so that I3 and I13 fail on the *first* violation
+; rather than at P12, when the analysis layer already exists and the fix is a refactor.
+; Until the layers have modules, every contract passes vacuously — that is the intended state.
+;
+; Run: `just check-imports`  (uv run lint-imports --config .importlinter)
+
+[importlinter]
+root_package = agentdx
+include_external_packages = True
+
+; --- events/ ---------------------------------------------------------------------------
+; "May import: —. Must not import: everything (it is the root contract)."
+[importlinter:contract:events-imports-nothing]
+name = events/ is the root contract and imports no other layer
+type = forbidden
+source_modules =
+    agentdx.events
+forbidden_modules =
+    agentdx.runtime
+    agentdx.store
+    agentdx.sdk
+    agentdx.analysis
+    agentdx.explore
+    agentdx.scenario
+    agentdx.otel
+    agentdx.api
+    agentdx.cli
+
+; --- store/ ----------------------------------------------------------------------------
+; "May import: events. Must not import: runtime, sdk, analysis."
+[importlinter:contract:store-persistence-only]
+name = store/ is persistence only — no runtime, sdk or analysis
+type = forbidden
+source_modules =
+    agentdx.store
+forbidden_modules =
+    agentdx.runtime
+    agentdx.sdk
+    agentdx.analysis
+    agentdx.explore
+    agentdx.api
+    agentdx.cli
+
+; --- runtime/ --------------------------------------------------------------------------
+; "May import: events, store. Must not import: analysis, sdk."
+[importlinter:contract:runtime-executes-only]
+name = runtime/ executes and never analyses
+type = forbidden
+source_modules =
+    agentdx.runtime
+forbidden_modules =
+    agentdx.analysis
+    agentdx.sdk
+    agentdx.explore
+    agentdx.api
+    agentdx.cli
+
+; --- sdk/ ------------------------------------------------------------------------------
+; "May import: events, runtime. Must not import: analysis."
+[importlinter:contract:sdk-captures-only]
+name = sdk/ captures and never analyses
+type = forbidden
+source_modules =
+    agentdx.sdk
+forbidden_modules =
+    agentdx.analysis
+    agentdx.explore
+    agentdx.api
+    agentdx.cli
+
+; --- analysis/ — invariant I3 ----------------------------------------------------------
+; "May import: events, store. Must not import: runtime, sdk, any model client."
+; NO MODULE IS EXEMPT, agentdx.analysis.baseline INCLUDED. Baseline must execute a run and
+; does so through a BaselineExecutor protocol declared in analysis and constructed in cli;
+; injection is the mechanism that AVOIDS the import, not a licence to make it (PRD §24.3).
+; There is deliberately no `ignore_imports` entry here. Adding one is an I3 violation.
+[importlinter:contract:analysis-is-pure]
+name = analysis/ is pure — no runtime, no sdk, no exceptions (I3)
+type = forbidden
+source_modules =
+    agentdx.analysis
+forbidden_modules =
+    agentdx.runtime
+    agentdx.sdk
+    agentdx.explore
+    agentdx.api
+    agentdx.cli
+
+; --- analysis/ — invariant I13 ---------------------------------------------------------
+; No model inference anywhere in the analysis, verdict or scoring path. Every finding is
+; produced by a deterministic algorithm; a model in this path breaks I1 and NFR-14 at once.
+; LLM-as-judge and embedding-based semantic dedup are out of scope (PRD §4.4, §43.3.2/3).
+[importlinter:contract:analysis-has-no-model-client]
+name = analysis/ imports no model client and no transport (I13)
+type = forbidden
+include_external_packages = True
+source_modules =
+    agentdx.analysis
+forbidden_modules =
+    langgraph
+    langchain
+    langchain_core
+    httpx
+    openai
+    groq
+    anthropic
+    fastapi
+
+; --- explore/ --------------------------------------------------------------------------
+; "May import: runtime, analysis.race. Must not import: —." The table lists no restriction,
+; so only the universal one is encoded: nothing above the transport layer is imported.
+[importlinter:contract:explore-below-transport]
+name = explore/ stays below the transport layer
+type = forbidden
+source_modules =
+    agentdx.explore
+forbidden_modules =
+    agentdx.api
+    agentdx.cli
+
+; --- scenario/ -------------------------------------------------------------------------
+; PRD §24.3 lists scenario's dependencies as "—". events/ is left permitted because it is
+; the root contract every layer may name; everything else is forbidden. If P08 genuinely
+; needs another layer, that is an ADR, not an edit to this file.
+[importlinter:contract:scenario-is-declarative]
+name = scenario/ is a declarative surface with no layer dependencies
+type = forbidden
+source_modules =
+    agentdx.scenario
+forbidden_modules =
+    agentdx.runtime
+    agentdx.store
+    agentdx.sdk
+    agentdx.analysis
+    agentdx.explore
+    agentdx.api
+    agentdx.cli
+
+; --- otel/ -----------------------------------------------------------------------------
+; OTel export is a projection of the sealed event log (PRD §30), never a dependency of the
+; runtime or the analysis path. P1, scope-cut #5.
+[importlinter:contract:otel-is-a-projection]
+name = otel/ is an export projection over the log, not a participant
+type = forbidden
+source_modules =
+    agentdx.otel
+forbidden_modules =
+    agentdx.runtime
+    agentdx.sdk
+    agentdx.analysis
+    agentdx.explore
+    agentdx.api
+    agentdx.cli
+
+; --- api/ ------------------------------------------------------------------------------
+; "May import: store, analysis. Must not import: runtime." The API server never imports the
+; runtime: it launches runs as a SUBPROCESS and tails the event table (PRD §24.2). Two
+; processes share the SQLite file in WAL mode — one writer, readers only here.
+[importlinter:contract:api-never-imports-runtime]
+name = api/ launches runs as a subprocess and never imports the runtime
+type = forbidden
+source_modules =
+    agentdx.api
+forbidden_modules =
+    agentdx.runtime
+    agentdx.sdk
+    agentdx.explore
+    agentdx.cli
+
+; --- cli/ ------------------------------------------------------------------------------
+; "May import: everything." The only rule is the converse: nothing imports the CLI. That is
+; already asserted by every contract above, which lists agentdx.cli as forbidden.

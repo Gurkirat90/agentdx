@@ -1,0 +1,71 @@
+name: determinism
+
+# Gate G3 / invariant I1 — the CI job that proves the thesis (PRD §33.3).
+#
+# Separated from ci.yml on purpose: it is slower, it runs on a schedule as well as on every
+# pull request, and when it fails the answer is never "adjust the assertion". A determinism
+# failure means the code is wrong (AGENTS.md §5, CONTEXT.md §11 tripwire 1).
+#
+# The suite lands at P06. Until then it collects zero tests and passes vacuously — the job
+# exists now so that the first replay test is gated the day it is written.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly: schedule-dependent flakiness is exactly what a once-per-PR run hides.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: determinism-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Not a nicety: hash randomisation changes iteration order and would make replay
+  # equality unreproducible across processes (AGENTS.md §4.1).
+  PYTHONHASHSEED: "0"
+
+jobs:
+  replay-equality:
+    name: 100 replays, canonical projection equality (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: extractions/setup-just@v2
+
+      - run: just sync
+
+      # G3: 100/100 identical canonical-log hashes at seed 42, at least 10 of them in fresh
+      # processes. Equality is on the canonical projection, not literal bytes (43.1.6) —
+      # wall_ts_ms and the other PRD §10.7 volatile fields are excluded by definition.
+      - name: Replay equality (G3)
+        run: just test tests/determinism/
+
+      # G2 / invariant I4, never waived: zero findings on the healthy fixture across the
+      # 100 replays AND the k=2 exploration frontier. The k=2 harness is P0 and independent
+      # of FR-6 (ADR-002), so no scope cut can reach this job.
+      - name: False positives on the healthy fixture (G2)
+        run: just test tests/false_positives/
+
+      - name: Upload divergence artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: divergence-${{ matrix.os }}
+          path: |
+            ci-out/
+            .agentdx-data/
+          if-no-files-found: ignore
+          retention-days: 14

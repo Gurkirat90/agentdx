@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+src/agentdx/api/static/          # built frontend, copied in at package time (PRD §39.4)
+
+# AgentDX runtime data (PRD §39.1) — never committed
+.agentdx-data/
+*.agentdx
+runs.db
+runs.db-wal
+runs.db-shm
+metrics.jsonl
+
+# Event/cache databases are generated, EXCEPT the committed fixture caches that
+# make the offline demo work (PRD §38.2, §39.4) — those are force-added.
+*.db
+*.db-wal
+*.db-shm
+!fixtures/*/cache/*.db
+
+# CI output
+ci-out/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

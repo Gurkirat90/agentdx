@@ -1,0 +1,165 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentdx"
+version = "0.1.0"
+description = "Pre-deployment reliability and coordination debugger for multi-agent AI systems"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "AgentDX" }]
+keywords = ["multi-agent", "determinism", "replay", "chaos", "langgraph", "debugging"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Software Development :: Debuggers",
+]
+
+# Dependency set = CONTEXT.md §3 (locked stack) + PRD §24.6.
+# The concrete package names for the §3 entries that name a capability rather
+# than a distribution (uvicorn, pydantic, pyyaml, httpx) are recorded in ADR-004.
+# Nothing may be added here without an ADR in CONTEXT.md §8 (AGENTS.md §2).
+dependencies = [
+  # Agent framework — CONTEXT.md §3, pin per ADR-003 (Q-43.2.1)
+  "langgraph>=1.2,<1.3",
+  # API — CONTEXT.md §3, PRD §26, §39.5
+  "fastapi>=0.115,<1.0",
+  "uvicorn>=0.32,<1.0",
+  "websockets>=13,<16",
+  "pydantic>=2.9,<3.0",
+  # CLI — CONTEXT.md §3, PRD §37
+  "typer>=0.15,<1.0",
+  # Store — CONTEXT.md §3, PRD §27 (sqlite3 is stdlib)
+  "duckdb>=1.1,<2.0",
+  # Scenario YAML — CONTEXT.md §3, PRD §12
+  "pyyaml>=6.0,<7.0",
+  # OpenAI-compatible provider shim — PRD §8.5 (no vendor SDK, by design)
+  "httpx>=0.27,<1.0",
+]
+
+[project.optional-dependencies]
+otel = [
+  # P1, scope-cut #5 (CONTEXT.md §12). Not installed by default.
+  "opentelemetry-api>=1.27,<2.0",
+  "opentelemetry-sdk>=1.27,<2.0",
+]
+
+[project.scripts]
+agentdx = "agentdx.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/agentdx/agentdx"
+
+[dependency-groups]
+dev = [
+  { include-group = "lint" },
+  { include-group = "test" },
+]
+lint = [
+  "ruff>=0.8,<1.0",
+  "mypy>=1.13",
+  "import-linter>=2.1,<3.0",
+  "pre-commit>=4.0,<5.0",
+  "types-pyyaml>=6.0",
+]
+test = [
+  "pytest>=8.3,<9.0",
+  "pytest-asyncio>=0.24,<2.0",
+  "hypothesis>=6.112,<7.0",  # PRD §33 property tests
+]
+bench = [
+  "pytest-benchmark>=5.0,<6.0",  # PRD §34
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentdx"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/agentdx", "agentdx.toml", "README.md", "LICENSE"]
+
+# ----------------------------------------------------------------------------
+# ruff — AGENTS.md §4: ruff incl. the D docstring rules
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+# ruff formats fenced Python blocks inside Markdown. The PRD is the read-only spec of
+# record (ADR-000) and its illustrative code must stay byte-identical to the document
+# that was adopted, so it is excluded rather than reformatted.
+extend-exclude = ["docs/AgentDX-PRD-v2.md"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",    # pycodestyle
+  "F",         # pyflakes
+  "I",         # isort
+  "D",         # pydocstyle — AGENTS.md §4
+  "UP",        # pyupgrade
+  "B",         # bugbear
+  "ANN",       # missing annotations — AGENTS.md §4 "full type hints"
+  "S",         # bandit
+  "C4",        # comprehensions
+  "PTH",       # pathlib
+  "RUF",
+  "TID",       # tidy imports
+  "DTZ",       # naive datetime — supports the determinism rule
+  "T20",       # no print() outside the CLI
+  "ERA",       # commented-out code
+  "TRY",       # exception antipatterns (AGENTS.md §4: no bare except)
+  "BLE",       # blind except
+]
+ignore = [
+  "D203",  # incompatible with D211
+  "D213",  # incompatible with D212
+]
+# `×` is one of Rule E1's units and `–` appears in prompt ranges (P10–P12). Both are
+# intentional, so they are allowed rather than each occurrence being suppressed.
+allowed-confusables = ["×", "–"]
+
+[tool.ruff.lint.per-file-ignores]
+# The CLI is the one surface that prints; scripts are CI gates that print and
+# exit. Neither is inside a run context (AGENTS.md §4.1 clause 4).
+"src/agentdx/cli/*" = ["T20"]
+"scripts/*" = ["T20", "S603", "S607"]  # CI gates print and shell out to git by design
+"tests/*" = ["D100", "D103", "S101"]  # asserts are the point of a test
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# ----------------------------------------------------------------------------
+# mypy — AGENTS.md §4: mypy --strict clean
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_unused_configs = true
+disallow_any_explicit = true          # AGENTS.md §4: no escape hatch
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+mypy_path = "src"
+packages = ["agentdx"]
+
+# ----------------------------------------------------------------------------
+# pytest
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+asyncio_mode = "strict"
+markers = [
+  "determinism: replay-equality suites (I1, gate G3)",
+  "false_positives: healthy-fixture control (I4, gate G2)",
+  "benchmark: published-number producers (I9, Rule E1)",
+]
+# PYTHONHASHSEED=0 is required project-wide (AGENTS.md §4.1); the justfile and
+# CI set it in the environment because pytest cannot set it for its own process.

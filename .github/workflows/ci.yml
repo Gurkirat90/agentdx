@@ -1,0 +1,118 @@
+name: CI
+
+# The CI spine. Every job here calls a `just` recipe and nothing else, so what CI runs and
+# what a developer runs are the same command by construction. All of it passes on an empty
+# tree — the gates exist before the code they gate, which is the only order in which an
+# architectural rule survives (CONTEXT.md §5 row 1).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Required project-wide; `agentdx doctor` checks it (AGENTS.md §4.1).
+  PYTHONHASHSEED: "0"
+
+jobs:
+  python:
+    name: python (${{ matrix.os }})
+    # NFR-12: macOS Apple silicon is the primary target, Linux is the Docker target.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check-ledger diffs §8/§9 against the base; a shallow clone has no base to diff.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Sync environment
+        run: just sync
+
+      # 1. ruff check + ruff format --check
+      - name: Lint
+        run: just lint
+
+      # 2. mypy --strict on src/agentdx
+      - name: Typecheck
+        run: just typecheck
+
+      # 3. pytest
+      - name: Test
+        run: just test
+
+      # 4. import-linter — the CONTEXT.md §4 layer contract, especially I3:
+      #    agentdx.analysis.* must not import agentdx.runtime.* or agentdx.sdk.*
+      - name: Layer contract (import-linter)
+        run: just check-imports
+
+      # 5. determinism hygiene — no ambient clock, randomness, uuid or set-order dependence
+      - name: Determinism hygiene
+        run: just check-determinism
+
+      - name: Entry point responds
+        run: uv run agentdx --help
+
+  ledger:
+    name: ledger and published numbers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: extractions/setup-just@v2
+
+      - run: just sync
+
+      # CONTEXT.md §8 and §9 are append-only (AGENTS.md §10, tripwire 13)
+      - name: Ledger integrity
+        run: just check-ledger
+
+      # Rule E1 / invariant I9: no published statistic without a committed measurement
+      - name: Published-number markers
+        run: just check-bench
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # 6. tsc --noEmit + eslint (AGENTS.md §4: TypeScript strict, no `any`)
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint

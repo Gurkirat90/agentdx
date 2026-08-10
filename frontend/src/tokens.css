@@ -1,0 +1,93 @@
+/*
+ * AgentDX design tokens — PRD §29.1, locked in CONTEXT.md §3.
+ *
+ * This file is the single source of colour, spacing, radius and type in the
+ * Control Tower. A literal hex value in a component is a defect (AGENTS.md §4):
+ * every panel and primitive reads these custom properties, so a token change is
+ * one edit and the contrast matrix stays checkable in CI (PRD §33.13).
+ */
+
+:root {
+  /* --- Base palette (as supplied, PRD §29.1) ------------------------------ */
+  --navy-900: #0a2947; /* primary surface / canvas */
+  --cream: #f3e4c9; /* primary text, active nodes */
+  --sage: #d3d4c0; /* secondary text, healthy state */
+  --clay: #8b5e3c; /* accent, heat, warning */
+
+  /* --- Derived tokens: status colours stay inside the same family --------- */
+  --navy-950: #061b30; /* recessed panels, wells */
+  --navy-800: #123659; /* raised cards */
+  --navy-700: #1d4a73; /* borders, grid lines */
+  --sage-dim: #8a9384; /* muted / inactive — NEVER body text (lands near 4:1) */
+  --ok: #9db88a; /* healthy — sage pushed green */
+  --warn: #c98f4b; /* degraded — clay pushed amber */
+  --crit: #a8443a; /* failed — clay pushed red, still earthy */
+  --fault: #e0a458; /* injected-fault marker — the one high-energy colour */
+
+  /* --- Latency heat ramp: graph edges and waterfall bars, fast → slow ----- */
+  --heat-0: var(--ok); /* fastest */
+  --heat-1: var(--sage);
+  --heat-2: var(--cream);
+  --heat-3: var(--warn);
+  --heat-4: var(--clay);
+  --heat-5: var(--crit); /* slowest */
+
+  /* --- Typography (PRD §29.2) -------------------------------------------- */
+  /* Deliberately no serif display face: that pairing on cream reads as
+     templated on a systems tool. */
+  --font-display: "Geist", "Inter Tight", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  /* Tabular numerals are non-negotiable for scannable timing columns. */
+  --font-mono: "IBM Plex Mono", "Geist Mono", ui-monospace, monospace;
+  --font-size-base: 14px;
+
+  /* --- Spacing scale (PRD §29.1) ----------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* --- Radii -------------------------------------------------------------- */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+
+  /* --- Focus (NFR-7: visible focus rings, keyboard accessible) ------------ */
+  --focus-ring: 2px solid var(--cream);
+  --focus-ring-offset: 2px;
+
+  /* --- Elevation is layering, not shadow: shadows read poorly on a dark,
+         earthy palette (PRD §29.1). --------------------------------------- */
+  --elevation-well: var(--navy-950);
+  --elevation-base: var(--navy-900);
+  --elevation-raised: var(--navy-800);
+  --elevation-border: var(--navy-700);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--elevation-base);
+  color: var(--cream); /* cream on navy-900 ≈ 12:1 */
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+}
+
+/* Every numeric readout uses the mono face with tabular numerals. */
+.numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

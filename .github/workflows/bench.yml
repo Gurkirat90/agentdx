@@ -1,0 +1,92 @@
+name: bench
+
+# The benchmark suite (PRD §34) and the regression gates on NFR-1, NFR-8 and NFR-15.
+#
+# Invariant I9: this workflow is the only legitimate origin of a number this project
+# publishes. Anything quoted in the README, the docs, the UI or a release note carries a
+# [bench:<file>] marker resolving to a committed file in bench/results/, and ci.yml fails
+# the build when one does not (Rule E1, scripts/check_bench_markers.py).
+#
+# Not run on every pull request: shared CI runners are too noisy for a 10% overhead budget
+# to be judged on, and a flaky gate teaches people to re-run rather than to investigate.
+# Weekly, on demand, and on release tags — plus the manual gate before publishing a number.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which suite to run"
+        required: false
+        default: "all"
+        type: choice
+        options: [all, overhead, determinism, race, explore, ui]
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONHASHSEED: "0"
+
+jobs:
+  bench:
+    name: benchmark suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS Apple silicon is the primary target and the platform published numbers are
+        # measured on (PRD §39.3); Linux is measured too so the Docker path is not a guess.
+        os: [macos-14, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: extractions/setup-just@v2
+
+      - name: Sync environment
+        run: uv sync --all-groups --group bench
+
+      # NFR-1 (<10% instrumentation overhead, regression-gated at 12%), NFR-8 analysis
+      # latency, NFR-9 memory, NFR-10 ingestion, NFR-15 cold start. Lands at P18.
+      - name: Run suite
+        run: just bench ${{ inputs.suite || 'all' }}
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ matrix.os }}
+          path: bench/results/
+          if-no-files-found: warn
+          retention-days: 90
+
+      # A benchmark run that changes a published number is not finished until the result
+      # file is committed: the marker in the prose must resolve (PRD §39.6 step 3).
+      - name: Markers still resolve
+        run: just check-bench
+
+  docker-cold-start:
+    name: cold docker compose up (G10, NFR-5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: extractions/setup-just@v2
+
+      # G10: `docker compose up` → healthy /api/health + a populated run list, cold, in
+      # under 180 seconds. The compose file and the harness land at P19.
+      - name: Timed cold start
+        run: just bench-docker-cold

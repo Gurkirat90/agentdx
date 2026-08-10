@@ -1,0 +1,76 @@
+# Local pre-commit hooks — AGENTS.md §10 ("a pre-commit hook runs the same script locally
+# so the failure is cheap") and §38.4.
+#
+# Every hook here is also a CI job. The point is that they are the SAME check, invoked the
+# same way: a hook that drifts from CI is worse than no hook, because it teaches people to
+# trust a green local run.
+#
+# Install with: just hooks
+
+default_install_hook_types: [pre-commit]
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Two files are excluded from every auto-fixer, for two different reasons:
+      #   CONTEXT.md            — the ledger's append-only check counts whitespace, so a
+      #                           helpful auto-fix would fail check-ledger (AGENTS.md §10).
+      #   docs/AgentDX-PRD-v2.md — the read-only spec of record (ADR-000). A formatter that
+      #                           silently rewrites the spec is how a spec starts to drift.
+      # Discovered the hard way: trailing-whitespace rewrote the PRD on its first run.
+      - id: end-of-file-fixer
+        exclude: ^(CONTEXT\.md|docs/AgentDX-PRD-v2\.md)$
+      - id: trailing-whitespace
+        exclude: ^(CONTEXT\.md|docs/AgentDX-PRD-v2\.md)$
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy-strict
+        name: mypy --strict src/agentdx
+        entry: uv run mypy --strict src/agentdx
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: import-linter
+        name: import-linter (CONTEXT.md §4 layer contract, I3 + I13)
+        entry: uv run lint-imports --config .importlinter
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: determinism-hygiene
+        name: determinism hygiene (I1, AGENTS.md §4.1)
+        entry: uv run python scripts/check_determinism_hygiene.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: check-ledger
+        name: CONTEXT.md ledger is append-only (AGENTS.md §10)
+        entry: uv run python scripts/check_ledger.py
+        language: system
+        files: ^CONTEXT\.md$
+        pass_filenames: false
+
+      - id: check-bench-markers
+        name: Rule E1 — every published number has a [bench:<file>] marker (I9)
+        entry: uv run python scripts/check_bench_markers.py
+        language: system
+        files: ^(README\.md|docs/.*\.md)$
+        pass_filenames: false

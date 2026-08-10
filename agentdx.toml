@@ -1,0 +1,29 @@
+# AgentDX default project configuration — PRD §8.7.
+#
+# Precedence (highest wins):
+#   CLI flag → environment variable → agentdx.toml → AgentDXConfig argument → default.
+#
+# Thresholds live here or in src/agentdx/analysis/verdict_rules.toml, never inline
+# in code (AGENTS.md §4, CONTEXT.md §11 tripwire 5).
+
+[run]
+seed = 42
+mode = "replay"                # record | replay | perturb | passthrough — replay is the default (I7)
+data_dir = "~/.agentdx"
+
+[privacy]
+capture_bodies = false         # NFR-6 / I8: hashes only by default
+redact_patterns = ["sk-[A-Za-z0-9]{20,}", "AKIA[0-9A-Z]{16}"]
+
+[scheduler]
+strict_determinism = true      # abort on determinism leaks (I1)
+step_budget = 100000
+
+[llm]
+provider = "groq"
+model = "llama-3.1-8b-instant"
+base_url = "https://api.groq.com/openai/v1"
+
+[analysis]
+residual_tolerance = 0.02      # gate G5: Σ(six buckets) + residual = virtual makespan
+redundancy = "exact_hash"      # exact_hash only in v1 (43.3.2)
