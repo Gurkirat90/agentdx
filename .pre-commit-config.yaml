@@ -31,15 +31,26 @@ repos:
         args: [--maxkb=2048]
       - id: detect-private-key
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
   - repo: local
     hooks:
+      # ruff runs from the project environment, NOT from ruff-pre-commit's own pinned copy.
+      # Those two resolve to different ruff versions — the remote hook pinned 0.8.4 while
+      # pyproject resolved 0.16.2 — so the same file passed `just lint` and failed the hook
+      # on a rule that no longer exists upstream. One toolchain, one version, one verdict.
+      - id: ruff
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
       - id: mypy-strict
         name: mypy --strict src/agentdx
         entry: uv run mypy --strict src/agentdx
