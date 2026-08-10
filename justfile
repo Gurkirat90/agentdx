@@ -45,17 +45,9 @@ lint:
 typecheck:
     uv run mypy --strict src/agentdx
 
-# pytest
-# TODO(P02): drop the exit-5 shim. Until events/ lands there are zero tests, and
-# pytest exits 5 ("no tests collected"), which is not a failure of this prompt.
-# The shim tolerates *only* code 5; a real test failure still fails the build.
+# pytest — the P01 exit-5 shim was removed at P02, which is when tests first exist (D-05)
 test *ARGS:
-    #!/usr/bin/env bash
-    set -uo pipefail
     uv run pytest {{ARGS}}
-    code=$?
-    if [ "$code" -eq 5 ]; then echo "pytest: no tests collected yet (P01 scaffold) — treating as pass"; exit 0; fi
-    exit "$code"
 
 # import-linter — the mechanical form of the CONTEXT.md §4 layer contract (I3, I13)
 check-imports:
