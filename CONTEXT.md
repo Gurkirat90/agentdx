@@ -6,12 +6,12 @@
 
 | Field | Value |
 |---|---|
-| Ledger version | 1.1 |
+| Ledger version | 1.2 |
 | Project | AgentDX — multi-agent coordination debugger, deterministic replay runtime, chaos harness |
 | Spec of record | `AgentDX-PRD-v2.md` (PRD & Technical Product Specification v2.0, 8 Aug 2026) |
 | Build window | 10 weeks, solo build |
-| Last updated | 2026-08-10 · P00c (C-2 confirmed, C-3 resolved by ADR-002) |
-| Current phase | Not started — awaiting P01 |
+| Last updated | 2026-08-10 · P01 (scaffold + CI spine built; ADR-003…006 logged, D-01…07 declared) |
+| Current phase | Week 1 — scaffold BUILT, awaiting P02 (`events/`) |
 
 ---
 
@@ -294,7 +294,7 @@ Older entries roll into `docs/journal/YYYY-WW.md` when this section exceeds 15 r
 
 | Date | Prompt | Model | Outcome | Files touched | Audit |
 |---|---|---|---|---|---|
-| 2026-08-10 | P01 | Claude Opus 5 | Repo scaffold, toolchain and CI spine. Seven gates wired and passing on the empty tree; each verified negatively (I3 broken deliberately on `analysis.baseline`, reverted). ADR-003…006 logged, D-01…06 declared. Found and fixed: the `trailing-whitespace` hook rewrote the read-only PRD on first run (D-04). **Author's verification ran on Linux/Python 3.10 only** (the build host could not fetch CPython 3.12); the owner re-ran the gates on macOS arm64/3.12 via `pre-commit --all-files` and `just ci` | 78 files, whole tree | pending |
+| 2026-08-10 | P01 | Claude Opus 5 | Repo scaffold, toolchain and CI spine. Seven gates wired and passing on the empty tree; each verified negatively (I3 broken deliberately on `analysis.baseline`, reverted). ADR-003…006 logged, D-01…06 declared. Found and fixed: the `trailing-whitespace` hook rewrote the read-only PRD on first run (D-04). **Author's verification ran on Linux/Python 3.10 only** (the build host could not fetch CPython 3.12); the owner re-ran them on macOS arm64/3.12 — `just ci`, `pre-commit --all-files`, frontend `tsc`+`eslint`, `agentdx --help`. Remote live at `988aa74`; ledger check now enforced against `origin/main` (D-07) | 78 files, whole tree | pending |
 | 2026-08-10 | P00d | Gemini (cold read) | **Ledger sufficiency test, 8 questions, CONTEXT.md alone: 7/8.** Q6 failed — I3's "sole exception" wording was read as permission for `analysis.baseline` to import `runtime`, the opposite of PRD §24.3. I3 rewritten; no allowlist entry permitted in the import-linter config. Also fixed: bare `§25` read as a CONTEXT ref, now `PRD §25` | `CONTEXT.md`, `AGENTS.md` | this row *is* the audit |
 | 2026-08-10 | P00c | Claude Opus 5 | Owner decisions applied: C-2 confirmed and closed; C-3 resolved by ADR-002 (k=2 harness split out of FR-6, made P0 at P12); §5 row 12b added | `CONTEXT.md` | pending |
 | 2026-08-10 | P00b | Claude Opus 5 | Governance validation pass: 9 mismatches corrected, I13 added, ADR-001 logged, C-1…C-3 recorded, `AGENTS.md` §4/§2/§10 made enforceable | `CONTEXT.md`, `AGENTS.md` | pending |
