@@ -1,0 +1,55 @@
+{
+  "benchmark": "store-write-throughput",
+  "composed_path": {
+    "events_per_second": 20566,
+    "measurement": "writer_to_store",
+    "met": true,
+    "note": "The store's own write path is what P03 owns and what this benchmark gates. The composed path additionally pays `events.canonical.canonical_bytes` once per event for the hash chain. Profiling attributes 52% of chain-hashing time to `canonical.encode_string`, which builds every string one character at a time in Python (5.2M list appends per 20 000 events). That is P02 code and is out of P03's scope to change; the byte contract would not move, only the implementation. Reported rather than hidden behind the store figure."
+  },
+  "environment": {
+    "batch_size": 128,
+    "implementation": "CPython",
+    "journal_mode": "WAL",
+    "machine": "arm64",
+    "processor": "arm",
+    "python": "3.12.2",
+    "synchronous": "NORMAL",
+    "system": "Darwin"
+  },
+  "headline_events_per_second": 65791,
+  "headline_measurement": "store_append",
+  "measurements": [
+    {
+      "best_seconds": 1.4856,
+      "events": 100004,
+      "events_per_second_best": 67314,
+      "events_per_second_worst": 65791,
+      "name": "store_append",
+      "repeats": 3,
+      "worst_seconds": 1.52
+    },
+    {
+      "best_seconds": 4.2276,
+      "events": 100004,
+      "events_per_second_best": 23655,
+      "events_per_second_worst": 20566,
+      "name": "writer_to_store",
+      "repeats": 3,
+      "worst_seconds": 4.8625
+    },
+    {
+      "best_seconds": 4.2744,
+      "events": 100004,
+      "events_per_second_best": 23395,
+      "events_per_second_worst": 23241,
+      "name": "with_snapshots",
+      "repeats": 3,
+      "worst_seconds": 4.3029
+    }
+  ],
+  "met": true,
+  "method": "Events are generated before timing starts, so construction is excluded. Each configuration runs `repeats` times against a fresh temporary database and the SLOWEST run is reported. batch_size=128, WAL, synchronous=NORMAL, five indexes on `events`, both append-only triggers installed.",
+  "requirement": "NFR-10",
+  "requirement_text": ">= 20 000 events/s sustained write throughput",
+  "threshold_events_per_second": 20000
+}

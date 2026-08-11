@@ -11,6 +11,25 @@ seed = 42
 mode = "replay"                # record | replay | perturb | passthrough — replay is the default (I7)
 data_dir = "~/.agentdx"
 
+[store]
+# Q-43.2.2 (PRD §27.1, §43.2): at or above this many events a run is exported to Parquet on
+# seal and analysed through DuckDB; below it, analysis reads SQLite directly. This is a
+# performance decision and never a semantic one — both paths produce identical results, and
+# tests/integration/store/test_duckdb_parity.py asserts it. Tune from benchmarks in week 5.
+duckdb_threshold_events = 20000
+
+# PRD §20.4: state snapshots every Nth event, so reconstruction is O(N) at any run length.
+# A snapshot is an optimisation; the log is the source of truth.
+snapshot_interval_events = 500
+
+# Events per store-side transaction (PRD §27.3). The writer owns flush policy; this is the
+# ceiling for the bulk paths (bundle import, Parquet round-trips).
+append_batch_size = 128
+
+# PRD §27.3: NORMAL during a run — a crash may lose the last batch, and the prefix before it
+# stays readable and analysable (NFR-13). Bundle export switches to FULL.
+synchronous = "NORMAL"
+
 [privacy]
 capture_bodies = false         # NFR-6 / I8: hashes only by default
 redact_patterns = ["sk-[A-Za-z0-9]{20,}", "AKIA[0-9A-Z]{16}"]
