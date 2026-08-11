@@ -335,10 +335,26 @@ Older entries roll into `docs/journal/YYYY-WW.md` when this section exceeds 15 r
 
 > **Paste this section, plus §1–§5 and §8–§12, into the new assistant.**
 
-- **What this is:** *(one line)*
-- **What is built and verified:** *(from §5)*
-- **What is built but unverified:** *(from §5)*
-- **What is next:** *(prompt ID + one line)*
-- **What is fragile right now:** *(from §9 and §11)*
-- **What must not be touched:** *(from §2 and §3)*
-- **Known open decisions the new assistant must not guess at:** *(from §10)*
+*Regenerated 2026-08-10, after P02 + OP-3. Stale the moment §5 changes — rewrite it, don't trust it.*
+
+- **What this is:** a pre-deployment coordination debugger for multi-agent AI systems — deterministic scheduler, LLM record/replay, fault injection, append-only event log, pure analysis over that log. Week 1 of 10, solo build.
+
+- **What is built and verified:** **nothing.** `VERIFIED` requires an independent OP-2 (§0) and none has run. Do not treat any module as audited.
+
+- **What is built but unverified:**
+  - **P01** repo scaffold, toolchain, seven CI gates. Green on GitHub.
+  - **P02** `events/` — the event contract, and the module everything else depends on. 248 tests. Its `docs/event-schema.md` (610 lines) is the human-readable contract; **read it before touching anything in `events/`, and before writing anything that consumes an event log.** A self-audit found six defects, three fixed under OP-3; the other three are listed below.
+
+- **What is next:** **P03 — `store/`**: SQLite (WAL), DuckDB views, snapshots, bundles. Five facts it must not get wrong: ① it implements the `EventSink` protocol declared in `events/writer.py` (`append(Sequence[ChainedEvent])`, `seal(run_id, final_hash)`); ② `prev_hash`/`this_hash` are **columns**, computed by the writer, never recomputed and never event fields (C-4); ③ the store never validates and never canonicalises — both belong to `events/`; ④ bundle JSONL uses `canonical.encode_event`/`decode_event`, never `json.dumps` — a second serialiser silently breaks byte-stability; ⑤ `store/` may import `events` and nothing else (§4).
+
+- **What is fragile right now:**
+  - **The schema freezes at the end of week 1 and is not frozen yet.** Outstanding: P05 fixtures must prove it *sufficient*, and `just ci` must go green on Python 3.12. Changing it after the freeze invalidates every recorded run.
+  - **D-08:** `events/` is written in a 3.10-parseable dialect (`TypeAlias`, `ValueEnum`) because the build host had no 3.12. Behaviour is identical. **Do not "modernise" it to PEP 695 / `StrEnum` without checking the host first** — that silently disables mypy and pytest.
+  - **`typecheck` has never been verified end to end**, and no gate has ever run on 3.12.
+  - **Known, unfixed** (from the P02 self-audit, deferred by decision): no committed artifact pins the canonical *bytes* of an event, so `docs/event-schema.md` §12's porter checklist is not fully verifiable; `verify_chain`'s length-mismatch branch returns an arbitrary seq rather than the first failing one; `normalise_vclock` sorts before NFC-normalising, so its returned key order can differ from canonical order (final bytes are unaffected); `DEFAULT_BATCH_SIZE` is inline in `writer.py` rather than in `agentdx.toml`.
+
+- **What must not be touched:** the §2 invariants and the §3 locked decisions. Two specifics that are easy to break by accident: **the canonical projection is derived from the volatility marks in `events/schema.py` — never write a second exclusion list** (§4, C-7); and **set-valued arrays must be emitted sorted** by their emitter (`E-EVENT-028`) — the canonicaliser deliberately does not reorder, because that would hide a nondeterministic emitter.
+
+- **Known open decisions the new assistant must not guess at:** §10's `Q-43.2.*` rows (SQLite→DuckDB threshold, calibration defaults, DPOR, canvas switchover, verdict weights, `state_read` sampling, bundle format). **Q-P02.1 is Accepted but only by owner delegation, not independent review** — the ten payload schemas PRD §9.5 never specified were derived by the same agent that accepted them. Treat them as the softest part of the contract and the first target of a real OP-2.
+
+- **Process rule most often broken here:** if the PRD contradicts itself, or is silent on something load-bearing, **stop and ask** (`AGENTS.md` §3). P02 hit four such cases before writing a line of code; two of them would have made gate G3 permanently unpassable had they been guessed instead.
