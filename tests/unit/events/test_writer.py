@@ -50,13 +50,54 @@ class TestStampingBoundary:
         assert list(signature.parameters) == ["self", "event"]
         assert signature.parameters["event"].annotation == "Event"
 
-    def test_writer_holds_no_counter_clock_or_vector_clock(self) -> None:
-        """If the writer had one of these it could stamp, and P06's lock would be bypassable."""
+    def test_the_event_reaching_the_sink_is_the_very_object_that_was_written(self) -> None:
+        """OP-3 F2 regression: the old test asserted three attribute spellings, not a property.
+
+        It checked that `_seq`, `_clock` and `_vclock` were absent from `vars(writer)` — while
+        the writer legitimately holds `_last_seq`, a counter. A refactor that added
+        `event = replace(event, seq=self._last_seq + 1)` would have stamped the event, killed
+        design constraint 6, and still passed. Identity is the property that actually matters:
+        whatever the writer hands the sink must be the same object it was given, unmodified.
+        """
+        sink = RecordingSink()
+        writer = EventWriter("r_f2a91", sink, batch_size=1)
+        event = factories.make_event(EventType.RUN_START, seq=0, vclock={"planner": 3})
+        writer.write(event)
+        assert sink.events[0].event is event
+
+    def test_the_writer_module_cannot_construct_or_modify_an_event(self) -> None:
+        """A structural guarantee, checked on the AST rather than trusted.
+
+        If `writer.py` never calls `Event(...)` and never calls `replace(...)`, it has no way
+        to produce an event different from the one handed to it — regardless of what state it
+        keeps. This is the mechanism behind design constraint 6, and unlike a name check it
+        cannot be defeated by renaming a variable.
+        """
+        import ast
+        import pathlib
+
+        import agentdx.events.writer as writer_module
+
+        tree = ast.parse(pathlib.Path(writer_module.__file__).read_text(encoding="utf-8"))
+        called = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        } | {
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert "Event" not in called, "writer.py constructs an Event — it must only pass through"
+        assert "replace" not in called, "writer.py calls replace() — it must not modify events"
+        assert "from_draft" not in called, "stamping belongs to the runtime, not the writer"
+
+    def test_the_writer_does_not_repair_a_gap_it_could_have_repaired(self) -> None:
+        """It holds `_last_seq`, so it *could* assign seq. It must refuse instead."""
         writer = EventWriter("r_f2a91", RecordingSink())
-        state = set(vars(writer))
-        assert "_seq" not in state
-        assert "_clock" not in state
-        assert "_vclock" not in state
+        writer.write(factories.make_event(EventType.RUN_START, seq=0, vclock={}))
+        with pytest.raises(WriterStateError):
+            writer.write(factories.make_event(EventType.STATE_READ, seq=7))
 
 
 class TestOrdering:

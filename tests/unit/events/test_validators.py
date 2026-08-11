@@ -225,17 +225,105 @@ class TestCrossEvent:
         )
         assert "E-EVENT-042" not in codes(check_cross_event([parent, child]))
 
+    def test_inheriting_the_wrong_fault_id_is_e_event_045(self) -> None:
+        """OP-3 F1 regression: E-EVENT-042 checked that taint EXISTS, never that it was right.
+
+        A child that inherits a `fault_id` no `fault_injected` event ever produced is an
+        emitter bug that used to validate cleanly, and it corrupts the PRD §2.6 cascade tree
+        silently — the taint is present and plausible, just attributed to the wrong fault.
+        """
+        injected = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=0,
+            fault_id="f_01",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_01"},
+        )
+        child = factories.make_event(
+            EventType.STATE_READ, seq=1, causal_parents=[0], fault_id="f_99_NEVER_INJECTED"
+        )
+        assert "E-EVENT-045" in codes(check_cross_event([injected, child]))
+
+    def test_inheriting_a_later_fault_over_an_earlier_one_is_e_event_044(self) -> None:
+        """PRD §9.4: where several faults contribute, `fault_id` holds the EARLIEST."""
+        first = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=0,
+            fault_id="f_01",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_01"},
+        )
+        second = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=1,
+            causal_parents=[0],
+            fault_id="f_02",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_02"},
+        )
+        # Descends from f_01 but claims the later f_02.
+        child = factories.make_event(
+            EventType.STATE_READ, seq=2, causal_parents=[0], fault_id="f_02"
+        )
+        assert "E-EVENT-044" in codes(check_cross_event([first, second, child]))
+
+    def test_inheriting_the_earliest_fault_passes(self) -> None:
+        """The correct case must stay clean — precision is never traded for recall (I5)."""
+        first = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=0,
+            fault_id="f_01",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_01"},
+        )
+        child = factories.make_event(
+            EventType.STATE_READ, seq=1, causal_parents=[0], fault_id="f_01"
+        )
+        assert check_cross_event([first, child]) == ()
+
+    def test_a_fault_effect_may_carry_its_own_fault_over_an_inherited_one(self) -> None:
+        """PRD §9.4 rule 1 outranks rule 2: an event a fault directly produced keeps its own."""
+        first = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=0,
+            fault_id="f_01",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_01"},
+        )
+        second = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=1,
+            fault_id="f_02",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_02"},
+        )
+        effect = factories.make_event(
+            EventType.FAULT_EFFECT,
+            seq=2,
+            causal_parents=[0, 1],
+            fault_id="f_02",
+            payload={**factories.sample_payload(EventType.FAULT_EFFECT), "fault_id": "f_02"},
+        )
+        assert "E-EVENT-044" not in codes(check_cross_event([first, second, effect]))
+
     def test_taint_without_a_tainted_parent_is_accepted(self) -> None:
         """PRD §9.4 rule 3 taints via agent context, an edge the log does not record.
 
         The 'iff' in the schema is therefore only half-checkable, and this test pins the
         deliberate gap so that nobody later 'fixes' it into a false positive.
+
+        Amended by OP-3 F1: the log now contains the `fault_injected` event for `f_09`.
+        The property under test is unchanged — an event may carry taint with no *tainted
+        causal parent* — but the original fixture had no injection anywhere, which no real
+        log has, and `E-EVENT-045` correctly rejects it. The fixture was unrealistic; the
+        assertion was not weakened.
         """
-        parent = factories.make_event(EventType.RUN_START, seq=0, vclock={})
-        child = factories.make_event(
-            EventType.STATE_READ, seq=1, causal_parents=[0], fault_id="f_09"
+        injected = factories.make_event(
+            EventType.FAULT_INJECTED,
+            seq=0,
+            fault_id="f_09",
+            payload={**factories.sample_payload(EventType.FAULT_INJECTED), "fault_id": "f_09"},
         )
-        assert check_cross_event([parent, child]) == ()
+        untainted = factories.make_event(EventType.SPAN_START, seq=1)
+        child = factories.make_event(
+            EventType.STATE_READ, seq=2, causal_parents=[1], fault_id="f_09"
+        )
+        assert untainted.fault_id is None, "the child's only parent is untainted"
+        assert check_cross_event([injected, untainted, child]) == ()
 
     def test_two_run_ids_in_one_log_is_e_event_043(self) -> None:
         """Two run ids in one log is e event 043."""

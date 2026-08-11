@@ -458,6 +458,22 @@ exactly where the scope table requires it, no vector-clock regression for the em
 **(c) Cross-event** — whole-log: every causal parent exists, no parent's clock is ahead of
 its child's in any slot, fault taint descends through `causal_parents`, one `run_id` per log.
 
+### Fault taint is checked by value, not merely by presence
+
+`E-EVENT-042` asks only whether taint was inherited. That leaves the more damaging bug
+untouched: inheriting the *wrong* fault. The taint is then present and plausible, the log
+validates, and the cascade tree attributes effects to a fault that did not cause them.
+Two further rules close it, both sound — neither can fire on a correct log:
+
+* `E-EVENT-045` — the `fault_id` names a fault no `fault_injected` event produced earlier in
+  this log.
+* `E-EVENT-044` — the event descends from an *earlier* fault than the one it claims. PRD
+  §9.4: *"Where multiple faults contribute, `fault_id` holds the earliest."*
+
+`fault_injected` and `fault_effect` are exempt from `E-EVENT-044`, because PRD §9.4 rule 1
+(the fault that directly produced this event) outranks rule 2 (inheritance): an effect of a
+later fault legitimately carries that later fault's id while descending from an earlier one.
+
 ### What cross-event validation deliberately does *not* check
 
 PRD §9.4 gives three ways an event acquires a `fault_id`. Rules 1 and 2 are recorded in the
@@ -501,6 +517,8 @@ renumbering one is a breaking change.
 | `E-EVENT-041` | cross-event | A causal parent's clock is ahead of its child's |
 | `E-EVENT-042` | cross-event | Fault taint was not inherited from a tainted parent |
 | `E-EVENT-043` | cross-event | More than one `run_id` in a single log |
+| `E-EVENT-044` | cross-event | The taint names a later fault than one reaching this event |
+| `E-EVENT-045` | cross-event | The taint names a fault never injected in this log |
 | `E-EVENT-050` | writer | Write attempted after the run was sealed |
 | `E-EVENT-051` | writer | Event belongs to a different run than the writer |
 | `E-EVENT-060` | migration | `schema_version` cannot be read by this build |

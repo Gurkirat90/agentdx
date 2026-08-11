@@ -399,7 +399,9 @@ def check_cross_event(events: Sequence[Event]) -> tuple[ValidationError, ...]:
     Failure modes: `E-EVENT-040` causal parent refers to a seq not in the log ·
     `E-EVENT-041` a causal parent's vclock is ahead of its child's in some slot ·
     `E-EVENT-042` fault taint was not inherited from a tainted causal parent (PRD §9.4
-    rule 2) · `E-EVENT-043` more than one run_id in a single log.
+    rule 2) · `E-EVENT-043` more than one run_id in a single log ·
+    `E-EVENT-044` the taint names a later fault than one reaching this event ·
+    `E-EVENT-045` the taint names a fault never injected in this log.
 
     Not checkable here, and deliberately not faked: PRD §9.4 rule 3 taints an agent through
     its *context* after it consumes a faulted input. That edge is not recorded in the log,
@@ -408,6 +410,7 @@ def check_cross_event(events: Sequence[Event]) -> tuple[ValidationError, ...]:
     """
     out: list[ValidationError] = []
     by_seq: dict[int, Event] = {}
+    injected_at: dict[str, int] = {}
 
     for event in events:
         if event.run_id and by_seq and event.run_id != next(iter(by_seq.values())).run_id:
@@ -454,8 +457,79 @@ def check_cross_event(events: Sequence[Event]) -> tuple[ValidationError, ...]:
                     )
                 )
         by_seq[event.seq] = event
+        out.extend(_check_taint_value(event, by_seq, injected_at))
 
     return tuple(out)
+
+
+def _check_taint_value(
+    event: Event, by_seq: Mapping[int, Event], injected_at: dict[str, int]
+) -> list[ValidationError]:
+    """Check that `fault_id` names the *right* fault, not merely some fault (PRD §9.4).
+
+    `E-EVENT-042` only asks whether taint was inherited at all. That leaves the far more
+    damaging bug untouched: inheriting the wrong fault. The taint is then present and
+    plausible, every log validates, and the §2.6 cascade tree attributes effects to a fault
+    that did not cause them — which is the whole reason the field exists.
+
+    Two rules, both sound (they cannot fire on a correct log, so I5's precision discipline
+    is preserved):
+
+    * `E-EVENT-045` — the `fault_id` was never injected anywhere earlier in this log.
+    * `E-EVENT-044` — the event descends from an *earlier* fault than the one it claims.
+      PRD §9.4: "Where multiple faults contribute, `fault_id` holds the earliest."
+
+    `fault_injected` and `fault_effect` are exempt from `E-EVENT-044`: PRD §9.4 rule 1 (the
+    fault that *directly produced* this event) outranks rule 2 (inheritance), so an effect of
+    a later fault legitimately carries that later fault's id even while descending from an
+    earlier one.
+
+    Mutates `injected_at`, recording each `fault_injected` before the event is checked, so a
+    fault is known to its own injection event.
+    """
+    out: list[ValidationError] = []
+
+    if event.type is EventType.FAULT_INJECTED and event.fault_id is not None:
+        injected_at.setdefault(event.fault_id, event.seq)
+
+    if event.fault_id is None:
+        return out
+
+    if event.fault_id not in injected_at:
+        out.append(
+            ValidationError(
+                "E-EVENT-045",
+                f"fault_id {event.fault_id!r} was never injected earlier in this log; taint "
+                f"must name a fault the log accounts for (PRD §9.4)",
+                event.seq,
+                "fault_id",
+            )
+        )
+        return out
+
+    if event.type in (EventType.FAULT_INJECTED, EventType.FAULT_EFFECT):
+        return out
+
+    inherited = [
+        injected_at[parent.fault_id]
+        for parent_seq in event.causal_parents
+        if (parent := by_seq.get(parent_seq)) is not None
+        and parent.fault_id is not None
+        and parent.fault_id in injected_at
+    ]
+    if inherited and injected_at[event.fault_id] > min(inherited):
+        earliest = next(f for f, s in injected_at.items() if s == min(inherited))
+        out.append(
+            ValidationError(
+                "E-EVENT-044",
+                f"fault_id {event.fault_id!r} (injected at seq {injected_at[event.fault_id]}) "
+                f"is later than {earliest!r} (injected at seq {min(inherited)}), which reaches "
+                f"this event through causal_parents; PRD §9.4 requires the earliest",
+                event.seq,
+                "fault_id",
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------------------
