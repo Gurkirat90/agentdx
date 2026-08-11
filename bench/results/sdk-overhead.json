@@ -1,0 +1,54 @@
+{
+  "benchmark": "sdk-overhead",
+  "conformant_to_prd_34_1": false,
+  "environment": {
+    "implementation": "CPython",
+    "journal_mode": "WAL",
+    "langgraph": "1.2.11",
+    "machine": "aarch64",
+    "nodes_per_graph": 4,
+    "processor": "aarch64",
+    "python": "3.10.12",
+    "synchronous": "NORMAL",
+    "system": "Linux"
+  },
+  "gate_status": "FR-1 is met in this measured configuration. NFR-1 is NOT met in full: see `not_measured` and CONTEXT.md D-31. Do not quote this as 'the NFR-1 number'.",
+  "headline_measurement": "llm_50ms",
+  "headline_overhead_permille": 43,
+  "interpretation": "The gated figure simulates 50 ms of work per node, which is 16x faster than Q-43.2.3's 800 ms default for an LLM call. A smaller denominator gives a LARGER ratio, so this is a conservative upper bound on the overhead a real graph pays \u2014 it is not projected onto 800 ms, because a projected number is not a measurement (see CONTEXT.md D-17 for what projecting one cost us). `no_work` is the pure instrumentation cost with no work to amortise it against; its ratio is large by construction and the microseconds-per-event figure beside it is the one that transfers to another workload.",
+  "measurements": [
+    {
+      "added_microseconds_per_event": 437,
+      "baseline_seconds_best": 8.9389,
+      "events_per_iteration": 22,
+      "instrumented_seconds_worst": 9.3234,
+      "iterations": 40,
+      "name": "llm_50ms",
+      "overhead_permille": 43,
+      "repeats": 3,
+      "simulated_node_latency_ms": 50
+    },
+    {
+      "added_microseconds_per_event": 61,
+      "baseline_seconds_best": 0.0235,
+      "events_per_iteration": 22,
+      "instrumented_seconds_worst": 0.0775,
+      "iterations": 40,
+      "name": "no_work",
+      "overhead_permille": 2293,
+      "repeats": 3,
+      "simulated_node_latency_ms": 0
+    }
+  ],
+  "met": true,
+  "method": "The uninstrumented graph is the denominator. The instrumented path is the whole production path \u2014 agent spans, state reads and writes, edge messages, EventWriter validation, canonical bytes, the blake2b chain, and batched inserts into a real SQLite database with WAL and both append-only triggers. Each configuration runs `repeats` times; the WORST instrumented sample is compared against the BEST uninstrumented one, so the published ratio is the least flattering pairing the data supports.",
+  "not_measured": [
+    "No provider or cache call is in the measured path. Node 'work' is simulated latency, so neither the passthrough path PRD \u00a734.1 specifies nor the replay path a real run uses is exercised. The instrumentation side IS the whole production path; the denominator is a simulation.",
+    "Two configurations, not PRD \u00a734.1's three, and neither is scenario-driven.",
+    "Worst-instrumented against best-uninstrumented, not median and p90. That is deliberately the least flattering pairing the data supports, but a single worst sample is not the statistic \u00a734.1 names.",
+    "Measured on the interpreter named in `environment`, which is NOT the project's pinned CPython 3.12 when it reads 3.10 (CONTEXT.md D-08, D-32)."
+  ],
+  "requirement": "NFR-1",
+  "requirement_text": "< 10% wall-clock overhead in passthrough mode",
+  "threshold_permille": 100
+}
