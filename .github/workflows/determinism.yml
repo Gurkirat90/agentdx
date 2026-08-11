@@ -8,6 +8,11 @@ name: determinism
 #
 # The suite lands at P06. Until then it collects zero tests and passes vacuously — the job
 # exists now so that the first replay test is gated the day it is written.
+#
+# "Passes vacuously" is not free: pytest exits 5 on an empty collection, and this job went
+# red for three runs after D-09 removed the shim that absorbed it. Each step below tolerates
+# exit 5 explicitly and says so in the run log, so the vacuum is visible rather than assumed
+# (D-19, CONTEXT.md §11 tripwire 15).
 
 on:
   push:
@@ -51,13 +56,35 @@ jobs:
       # processes. Equality is on the canonical projection, not literal bytes (43.1.6) —
       # wall_ts_ms and the other PRD §10.7 volatile fields are excluded by definition.
       - name: Replay equality (G3)
-        run: just test tests/determinism/
+        # The suite lands at P06 and `tests/determinism/` holds no tests until then, so
+        # pytest exits 5 ("no tests collected"). That used to be absorbed by a shim inside
+        # `just test`; D-09 removed the shim at P02 and this job went red for three runs
+        # before anyone noticed (D-19). Exit 5 is tolerated HERE, where the emptiness is
+        # expected and dated, rather than globally in the justfile where it would mask a
+        # genuinely empty run anywhere. Every other non-zero status still fails the job.
+        run: |
+          status=0
+          just test tests/determinism/ || status=$?
+          if [ "$status" -eq 5 ]; then
+            echo "::notice title=G3 not yet gated::tests/determinism/ is empty. The replay-equality suite lands at P06 (CONTEXT.md §5 row 6). This step will start gating the day the first test is written."
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
 
       # G2 / invariant I4, never waived: zero findings on the healthy fixture across the
       # 100 replays AND the k=2 exploration frontier. The k=2 harness is P0 and independent
       # of FR-6 (ADR-002), so no scope cut can reach this job.
       - name: False positives on the healthy fixture (G2)
-        run: just test tests/false_positives/
+        # Same shape as G3 above: the k=2 harness lands at P12 (ADR-002), so this directory
+        # is empty until then and pytest exits 5. Tolerated here only, and announced.
+        run: |
+          status=0
+          just test tests/false_positives/ || status=$?
+          if [ "$status" -eq 5 ]; then
+            echo "::notice title=G2 not yet gated::tests/false_positives/ is empty. The k=2 harness lands at P12 (ADR-002, CONTEXT.md §5 row 12b). This step will start gating the day the first test is written."
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
 
       - name: Upload divergence artefacts
         if: failure()
