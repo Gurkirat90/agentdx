@@ -1,0 +1,14 @@
+{
+  "web_search": {
+    "{\"query\": \"record/replay logging\"}": ["paper: Instant Replay (1987)", "paper: liblog"],
+    "{\"query\": \"deterministic scheduling\"}": ["paper: DThreads", "paper: Kendo"],
+    "{\"query\": \"state-machine replication\"}": ["paper: Schneider 1990 SMR survey"],
+    "{\"query\": \"checkpoint/restart\"}": ["paper: CRIU", "paper: BLCR"]
+  },
+  "summarise": {
+    "{\"hits\": [\"paper: Instant Replay (1987)\", \"paper: liblog\"], \"topic\": \"record/replay logging\"}": "Record/replay logging captures nondeterministic inputs (thread schedules, syscalls) during a reference run and replays them exactly on re-execution.",
+    "{\"hits\": [\"paper: DThreads\", \"paper: Kendo\"], \"topic\": \"deterministic scheduling\"}": "Deterministic scheduling enforces a fixed, reproducible thread interleaving at runtime rather than recording an arbitrary one.",
+    "{\"hits\": [\"paper: Schneider 1990 SMR survey\"], \"topic\": \"state-machine replication\"}": "State-machine replication achieves determinism by applying the same totally-ordered command sequence to every replica.",
+    "{\"hits\": [\"paper: CRIU\", \"paper: BLCR\"], \"topic\": \"checkpoint/restart\"}": "Checkpoint/restart sidesteps replaying execution history entirely by snapshotting and restoring full process state."
+  }
+}

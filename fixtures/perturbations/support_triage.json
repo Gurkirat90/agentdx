@@ -1,0 +1,24 @@
+{
+  "$schema_note": "Curated confident-wrong responses (PRD §11.8 confident_wrong mode). Hand-authored — no judge model (I13/43.1.4).",
+  "fixture": "support_triage",
+  "entries": [
+    {
+      "id": "st-perturb-1",
+      "agent": "classifier",
+      "tool_or_llm": "classifier_output",
+      "wrong_response": {"category": "billing.cancellation_request"},
+      "actually_correct_response": {"category": "billing.duplicate_charge"},
+      "plausible_because": "A duplicate-charge ticket that mentions money confidently misclassified as a cancellation request is a realistic, plausible-sounding wrong category, not an obviously broken one — it shares the 'billing' parent category with the correct answer."
+    },
+    {
+      "id": "st-perturb-2",
+      "agent": "retriever_a",
+      "tool": "vector_search",
+      "args_key": "{\"k\": 5, \"query\": \"I was charged twice for my subscription this month\"}",
+      "wrong_response": ["kb://billing/cancellation-policy#refund-window"],
+      "actually_correct_response": ["kb://billing/duplicate-charges#refund-policy", "kb://billing/subscriptions#proration"],
+      "plausible_because": "The wrong document is topically adjacent (billing, refunds) but answers a different question (cancellation refund windows, not duplicate-charge refunds) — grounded-but-wrong retrieval, the case §11.8 exists to measure the system's response to."
+    }
+  ],
+  "not_yet_wired": "Same status as fixtures/perturbations/code_pipeline.json — no consumer until P07/P09."
+}

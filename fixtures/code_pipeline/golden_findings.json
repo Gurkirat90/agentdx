@@ -1,0 +1,54 @@
+{
+  "$schema_note": "OP-3 repair (2026-08-12): findings now contains ONLY entries with non-empty evidence, so invariant I6 ('every finding carries evidence... an empty evidence array fails schema validation') is never violated by this file itself. Anything PRD §23.1 describes that this fixture cannot yet back with evidence is filed under expected_not_yet_built or expected_not_yet_measurable instead — those sections make no evidence claim and must not be read as findings. Mechanically enforced by scripts/check_fixture_finding_evidence.py.",
+  "fixture": "code_pipeline",
+  "prd_section": "23.1",
+  "gate": "G1",
+  "seed": 42,
+  "golden_log": "tests/golden/code_pipeline.jsonl",
+  "status": "PROVISIONAL — recorded before runtime/ (P06) and runtime/cache/ (P07) exist, per ADR-001. Regenerate at P07.",
+  "findings": [
+    {
+      "finding_id": "code_pipeline-f1-lost-update",
+      "type": "state_conflict",
+      "subtype": "write_write",
+      "severity": "critical",
+      "title": "Lost update on draft.module_a between coder and reviewer",
+      "description": "coder (seq 13) and reviewer (seq 28) both write draft.module_a with no reducer, lock or transaction linking the two writes (both state_write events carry reducer=null, lock_id=null, and neither's causal_parents names the other). reviewer's write always lands second under the fixture's deterministic ordering (see README) and silently overwrites coder's revision; tester's subsequent read (seq 36) observes only reviewer's value. This is the seeded defect gate G1 requires.",
+      "evidence": {
+        "seq": [13, 28, 36],
+        "writers": ["coder", "reviewer"],
+        "key": "draft.module_a",
+        "surviving_write_seq": 28,
+        "discarded_write_seq": 13
+      },
+      "recommendation": "Route both writers through a single owner (planner) or add an explicit reducer/lock around draft.module_a so a concurrent write is merged or serialised rather than silently dropped."
+    }
+  ],
+  "expected_not_yet_built": [
+    {
+      "finding_id": "code_pipeline-f2-coordination-bottleneck",
+      "type": "coordination_bottleneck",
+      "subtype": "critical_path_share",
+      "prd_reference": "23.1",
+      "description": "PRD §23.1's secondary defect: a heavy coder<->reviewer handoff (full draft serialised each way), ~60% of critical-path time. This is a real gap, not a measurement limitation: fixtures/code_pipeline/graph.py has no edge, message or shared read connecting coder and reviewer at all — nothing to attach a critical-path share to, regardless of timing model. Not built, and mislabeled 'not computable' in an earlier revision of this file; corrected under OP-3 (2026-08-12)."
+    }
+  ],
+  "expected_not_yet_measurable": [
+    {
+      "finding_id": "code_pipeline-verdict",
+      "type": "verdict",
+      "expected": "STATE_CONFLICT_RISK (primary), NEGATIVE_SPEEDUP (secondary badge, precedence per PRD §23.1)",
+      "reason": "Verdict scoring (FR-8, analysis/verdict, P11, NOT STARTED) does not exist yet. The topology this verdict would be computed from (the lost update) is real and evidenced above; the verdict itself is not."
+    },
+    {
+      "finding_id": "code_pipeline-speedup",
+      "type": "speedup",
+      "expected": "achieved speedup < 1.0",
+      "reason": "No single-agent baseline exists yet (analysis/baseline, P11, NOT STARTED)."
+    }
+  ],
+  "healthy_variant_note": "PRD §23.1: after the documented fix (a reducer or routing writes through the planner), finding f1 disappears; f2 and the speedup finding remain, because they are a topology problem, not a concurrency problem. Not built as a second fixture here — out of this prompt's DELIVERABLES.",
+  "must_not_appear": [
+    "Any finding whose evidence names a causal_parents edge between the coder write (seq 13) and the reviewer write (seq 28) — there is none in this log; a detector that invents one is wrong."
+  ]
+}

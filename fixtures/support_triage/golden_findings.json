@@ -1,0 +1,52 @@
+{
+  "$schema_note": "OP-3 repair (2026-08-12): findings now contains ONLY entries with non-empty evidence (invariant I6). Anything PRD §23.2 describes that this fixture cannot yet back with evidence is filed under expected_not_yet_built or expected_not_yet_measurable, which make no evidence claim and must not be read as findings. Mechanically enforced by scripts/check_fixture_finding_evidence.py.",
+  "fixture": "support_triage",
+  "prd_section": "23.2",
+  "gate": "the redundancy detector's only seeded-redundancy input (ADR-001 rationale (c))",
+  "seed": 42,
+  "golden_log": "tests/golden/support_triage.jsonl",
+  "status": "PROVISIONAL — recorded before runtime/ (P06) and runtime/cache/ (P07) exist, per ADR-001. Regenerate at P07.",
+  "findings": [
+    {
+      "finding_id": "support_triage-f1-redundant-vector-search",
+      "type": "redundant_work",
+      "subtype": "exact_hash_duplicate",
+      "severity": "medium",
+      "title": "retriever_a and retriever_b issue an identical vector_search call",
+      "description": "tool_call seq 9 (retriever_a) and seq 20 (retriever_b) both call vector_search with args {\"k\": 5, \"query\": \"I was charged twice for my subscription this month\"}. args_hash is identical (blake2b:f79c148c3401cb...) — exact-hash redundancy per CONTEXT.md §3's v1 redundancy rule (`tool_name ‖ canonical_json(args)`), no embedding similarity required or used.",
+      "evidence": {
+        "seq": [9, 20],
+        "tool": "vector_search",
+        "args_hash": "blake2b:f79c148c3401cb",
+        "callers": ["retriever_a", "retriever_b"]
+      },
+      "recommendation": "Cache the vector_search result at the classifier or have one retriever share its result with the other via agentdx.send/recv."
+    }
+  ],
+  "expected_not_yet_built": [
+    {
+      "finding_id": "support_triage-f2-fake-fanout-distinction",
+      "type": "fake_fanout",
+      "prd_reference": "23.2",
+      "description": "PRD §23.2's seeded defect 2 requires retriever_a/retriever_b's declared 2-way fan-out to be structurally distinguishable from genuine parallelism (PRD: 'the fan-out never overlaps meaningfully'). This is a real gap, not a measurement limitation: fixtures/support_triage/graph.py uses the identical topological pattern as fixtures/research_fanout/graph.py's genuine fan-out — N children of one node, no edges between children, one downstream consumer. Nothing in the code makes this fixture's fan-out 'fake' beyond having two branches instead of four and one redundant call. Not built, and mislabeled 'not computable' in an earlier revision of this file; corrected under OP-3 (2026-08-12)."
+    }
+  ],
+  "expected_not_yet_measurable": [
+    {
+      "finding_id": "support_triage-verdict",
+      "type": "verdict",
+      "expected": "COORDINATION_BOTTLENECK or NEUTRAL, depending on measured timings (PRD §23.2)",
+      "reason": "Verdict scoring (FR-8, P11, NOT STARTED) does not exist yet."
+    },
+    {
+      "finding_id": "support_triage-token-cost-multiplier",
+      "type": "token_cost_multiplier",
+      "expected": "> 2x",
+      "reason": "This fixture represents agent work as instrumented tool calls (PRD §23.2's own Tools row lists no LLM call), so there is no token count in tests/golden/support_triage.jsonl to multiply. The redundant vector_search call (finding f1 above) is the concrete, evidenced proxy for the wasted-cost claim."
+    }
+  ],
+  "must_be_zero": {
+    "state_conflict_findings": true,
+    "reason": "PRD §23.2 point 4: this is a *partial* false-positive control. context.docs_a, context.docs_b, context.docs and response_draft each have exactly one writer in tests/golden/support_triage.jsonl (classifier: ticket, category; retriever_a: context.docs_a; retriever_b: context.docs_b; responder: context.docs, response_draft) — no key is written by more than one agent."
+  }
+}

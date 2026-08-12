@@ -1,0 +1,40 @@
+{
+  "$schema_note": "This is the most important golden file in the repository (PRD §23.3). An empty finding set above `info` is a real assertion, not a placeholder — see README 'The structural race-freedom argument'. OP-3 repair (2026-08-12): the timing-dependent expectation (average parallelism) and the resilience row are now filed under expected_not_yet_measurable / expected_not_yet_built rather than as zero-evidence findings, matching invariant I6 and the same repair applied to the other two fixtures. Schema-conformance correction (2026-08-13, found by an independent OP-2): this file used a fourth key, `not_built`, for one prompt-length of time — ADR-011 fixes the schema at exactly `findings` / `expected_not_yet_built` / `expected_not_yet_measurable`, and `not_built` is now `expected_not_yet_built`, matching code_pipeline and support_triage.",
+  "fixture": "research_fanout",
+  "prd_section": "23.3",
+  "gate": "G2, invariant I4 — never waived",
+  "seed": 42,
+  "golden_log": "tests/golden/research_fanout.jsonl",
+  "status": "PROVISIONAL stamping only (ADR-001) — the empty finding set itself does not depend on P06/P07 and is fully verifiable from this log today; see README.",
+  "findings": [],
+  "must_be_empty_above_info": true,
+  "state_conflicts": {
+    "count": 0,
+    "reason": "The only key more than one node writes is `findings`, a real LangGraph reducer channel (Annotated[list[str], operator.add]). Verified: every state_write to findings in tests/golden/research_fanout.jsonl carries reducer=\"operator.add\" (seq 14, 25, 36, 47 — worker_1..4). No other key is written by more than one agent."
+  },
+  "redundancy": {
+    "count": 0,
+    "reason": "Each worker's web_search query is one of four disjoint SUBTOPICS; no two tool_call events share an args_hash."
+  },
+  "expected_not_yet_measurable": [
+    {
+      "finding_id": "research_fanout-fake-fanout-flag",
+      "type": "fake_fanout",
+      "expected": "not flagged; average parallelism >= 3.0 (PRD §23.3)",
+      "reason": "fixtures/_harness.py's virtual_ts_ms is a plain per-event counter, not a calibrated duration model (Q-43.2.3 OPEN). This is the one PRD §23.3 expectation that is timing-dependent rather than structural; becomes verifiable once P06 lands and this corpus is regenerated (ADR-001 consequence 2). Unlike support_triage's equivalent gap, the *structural* facts that make this TRUE already hold and are evidenced: no worker awaits another worker, and all four are direct children of supervisor with no edges between them (tests/golden/test_fixtures_replay.py::test_research_fanout_has_no_shared_unreduced_writes)."
+    },
+    {
+      "finding_id": "research_fanout-verdict",
+      "type": "verdict",
+      "expected": "BENEFICIAL, achieved speedup > 1.0",
+      "reason": "No single-agent baseline exists yet (analysis/baseline, P11, NOT STARTED)."
+    }
+  ],
+  "expected_not_yet_built": [
+    {
+      "finding_id": "research_fanout-resilience-agent-crash-worker-3",
+      "prd_reference": "23.3",
+      "description": "Resilience under agent_crash(worker_3): graceful, synthesiser proceeds with three findings and marks the result partial. Requires fault injection (runtime/faults/, P09, NOT STARTED). Out of this prompt's DELIVERABLES."
+    }
+  ]
+}

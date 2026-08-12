@@ -1,0 +1,16 @@
+{
+  "$schema_note": "Curated confident-wrong responses (PRD §11.8 confident_wrong mode). Hand-authored — no judge model (I13/43.1.4). Included for completeness even though this fixture is the healthy control: PRD §23.3 also asks for a resilience measurement (agent_crash(worker_3), not built here — see README), and a byzantine worker is the other stress case a control fixture should have data ready for.",
+  "fixture": "research_fanout",
+  "entries": [
+    {
+      "id": "rf-perturb-1",
+      "agent": "worker_2",
+      "tool": "summarise",
+      "args_key": "{\"hits\": [\"paper: DThreads\", \"paper: Kendo\"], \"topic\": \"deterministic scheduling\"}",
+      "wrong_response": "Deterministic scheduling is not used in production distributed systems and is purely theoretical.",
+      "actually_correct_response": "Deterministic scheduling enforces a fixed, reproducible thread interleaving at runtime rather than recording an arbitrary one.",
+      "plausible_because": "A confidently wrong summary that reads fluently and cites the right topic, but overstates a claim the source papers do not make — measurable via the system's response (does the report contradict itself against the other three, correct findings?) rather than a judge model's opinion."
+    }
+  ],
+  "not_yet_wired": "Same status as fixtures/perturbations/code_pipeline.json — no consumer until P07/P09."
+}

@@ -34,7 +34,7 @@ hooks:
 # ---------------------------------------------------------------------------
 
 # Everything CI runs, in CI's order
-ci: lint typecheck test check-imports check-determinism check-ledger check-bench
+ci: lint typecheck test check-imports check-determinism check-ledger check-bench check-fixture-evidence
 
 # ruff lint + format check (AGENTS.md §4)
 lint:
@@ -64,6 +64,23 @@ check-ledger:
 # Rule E1: every published number carries a resolvable [bench:<file>] marker (I9, tripwire 7)
 check-bench:
     uv run python scripts/check_bench_markers.py
+
+# ADR-011 / tripwire 4 / invariant I6, over fixtures/*/golden_findings.json — every fixture's
+# `findings` array carries real seq evidence, and no finding-shaped array hides under an
+# unsanctioned key. Joined `just ci` 2026-08-13: the justfile's own prior comment said this
+# happens once P05's tests land in `just test`'s default collection, and
+# tests/golden/test_fixtures_replay.py already does (testpaths = ["tests"]) — an independent
+# OP-2 audit noted the condition was met but the wiring hadn't followed, so it's done here.
+check-fixture-evidence:
+    uv run python scripts/check_fixture_finding_evidence.py
+
+# FR-12 — run the three reference fixtures and diff their canonical log hash against
+# tests/golden/*.jsonl (PRD §23), plus check-fixture-evidence. The hash-comparison half is
+# also covered by `just test` (test_fixtures_replay.py's golden-equality tests), so this
+# recipe is the convenient, no-test-framework-required combined form for a human or a script.
+fixtures-check:
+    uv run python -m tests.golden.fixtures_runner check
+    just check-fixture-evidence
 
 # ---------------------------------------------------------------------------
 # Frontend

@@ -1,0 +1,16 @@
+{
+  "read_file": {
+    "{\"path\": \"module_a.py\"}": "def normalise(value):\n    return value.strip().lower()\n"
+  },
+  "write_draft": {
+    "{\"content_len\": 89, \"path\": \"module_a.py\"}": "ok",
+    "{\"content_len\": 97, \"path\": \"module_a.py\"}": "ok",
+    "{\"content_len\": 27, \"path\": \"module_b.py\"}": "ok"
+  },
+  "run_tests": {
+    "{\"module\": \"module_a\"}": {"passed": true, "failures": []}
+  },
+  "lint": {
+    "{\"module\": \"module_a\"}": {"issues": []}
+  }
+}

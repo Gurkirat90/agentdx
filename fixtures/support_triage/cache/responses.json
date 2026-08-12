@@ -1,0 +1,18 @@
+{
+  "vector_search": {
+    "{\"k\": 5, \"query\": \"I was charged twice for my subscription this month\"}": [
+      "kb://billing/duplicate-charges#refund-policy",
+      "kb://billing/subscriptions#proration"
+    ]
+  },
+  "kb_lookup": {
+    "{\"collection\": \"billing_docs\"}": [
+      "billing_docs: duplicate charges are refunded automatically within 3 business days"
+    ]
+  },
+  "ticket_history": {
+    "{\"ticket_id\": \"cust_4821\"}": [
+      "ticket #4801 (30 days ago): billing question, resolved"
+    ]
+  }
+}

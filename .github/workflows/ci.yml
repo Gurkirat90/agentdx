@@ -57,6 +57,12 @@ jobs:
       - name: Test
         run: just test
 
+      # 3b. ADR-011 / tripwire 4 / invariant I6 over fixtures/*/golden_findings.json — added
+      #     2026-08-13 once tests/golden/test_fixtures_replay.py landed in `just test`'s
+      #     default collection, which is the condition this step was previously waiting on.
+      - name: Fixture finding evidence
+        run: just check-fixture-evidence
+
       # 4. import-linter — the CONTEXT.md §4 layer contract, especially I3:
       #    agentdx.analysis.* must not import agentdx.runtime.* or agentdx.sdk.*
       - name: Layer contract (import-linter)
