@@ -14,10 +14,18 @@ this module currently exposes only the sections P03 needs. Later prompts extend
 resolution order.
 
 P04 added `[run]`, `[privacy]` and `[llm]` — the three tables PRD §8.7 requires the
-instrumentation SDK to read. `[scheduler]` and `[analysis]` are deliberately still absent:
-they belong to P06 and P10, and a section declared before its consumer exists is a
-threshold nobody is enforcing. Unknown tables in `agentdx.toml` are ignored, so the file can
-carry them ahead of their prompt (and it does).
+instrumentation SDK to read. `[analysis]` is deliberately still absent: it belongs to P10,
+and a section declared before its consumer exists is a threshold nobody is enforcing.
+Unknown tables in `agentdx.toml` are ignored, so the file can carry them ahead of their
+prompt (and it does).
+
+P06 added `[scheduler]` — `strict_determinism` and `step_budget` already existed in
+`agentdx.toml` (P01 scaffold, unread until now); this module is what makes them real
+settings instead of inert text. Also added: the three PRD §10.4/Q-43.2.3 calibration
+defaults (`calibration_llm_ms`, `calibration_tool_ms`, `calibration_agent_step_ms`), so
+`runtime/clock.py`'s `CalibrationProfile` fallback has no literal of its own (AGENTS.md §4:
+no magic numbers). Declared as a deviation — `config.py` is not in P06's `DELIVERABLES`, and
+this follows the D-12/D-20 precedent of extending it when the section's own consumer lands.
 
 Determinism note: this module reads the environment and the filesystem. Neither is a source
 of non-determinism *inside a run* — configuration is resolved before a run starts and is
@@ -197,6 +205,48 @@ class LlmConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SchedulerConfig:
+    """The `[scheduler]` table of PRD §8.7 — the cooperative scheduler's tunables (P06).
+
+    Guarantees: `step_budget` and the three calibration defaults are the *only* place either
+    kind of number may live; `runtime/scheduler.py` and `runtime/clock.py` hold no literal
+    of their own (AGENTS.md §4, tripwire 5).
+    """
+
+    strict_determinism: bool = True
+    """PRD §10.2/§10.5/§10.6: when True, a determinism leak the runtime can detect but
+    cannot safely redirect (a spawned OS thread, unmanaged I/O) aborts the run (`E-SCHED-004`)
+    rather than merely emitting a `nondeterminism_warning`. Defaults True — CONTEXT.md's own
+    `agentdx.toml` shipped this default before this module existed to read it."""
+
+    step_budget: int = 100_000
+    """PRD §10.2 edge case / `E-SCHED-003`: the scheduler aborts if this many decision steps
+    pass with no virtual-clock advance (livelock). PRD §36's error-table *example* says
+    "10 000 steps" in the rendered message text; the shipped default here is the value
+    `agentdx.toml` already carried from P01, ten times looser. Not reconciled with the PRD's
+    illustrative number — see the P06 response's NOT DONE/RISKS — but it is the one number
+    that governs behaviour, and it lives here rather than inline either way."""
+
+    calibration_llm_ms: int = 800
+    """Q-43.2.3 default virtual duration for a span of kind `llm_call` with no calibration
+    profile entry. PRD §10.4."""
+
+    calibration_tool_ms: int = 200
+    """Q-43.2.3 default virtual duration for a span of kind `tool_call`."""
+
+    calibration_agent_step_ms: int = 50
+    """Q-43.2.3 default virtual duration for a span of kind `agent_step`."""
+
+    def with_overrides(self, **kwargs: object) -> SchedulerConfig:
+        """Return a copy with the non-None keyword arguments applied.
+
+        Raises:
+            ConfigError: a keyword names a field this section does not have.
+        """
+        return _apply(self, "scheduler", kwargs)
+
+
+@dataclass(frozen=True, slots=True)
 class AgentDXConfig:
     """The resolved configuration for one process.
 
@@ -209,6 +259,7 @@ class AgentDXConfig:
     run: RunConfig = RunConfig()
     privacy: PrivacyConfig = PrivacyConfig()
     llm: LlmConfig = LlmConfig()
+    scheduler: SchedulerConfig = SchedulerConfig()
 
     @classmethod
     def load(
@@ -220,6 +271,7 @@ class AgentDXConfig:
         run: Mapping[str, object] | None = None,
         privacy: Mapping[str, object] | None = None,
         llm: Mapping[str, object] | None = None,
+        scheduler: Mapping[str, object] | None = None,
     ) -> AgentDXConfig:
         """Resolve configuration through the PRD §8.7 precedence chain.
 
@@ -237,6 +289,7 @@ class AgentDXConfig:
             run: Per-call `[run]` overrides.
             privacy: Per-call `[privacy]` overrides.
             llm: Per-call `[llm]` overrides.
+            scheduler: Per-call `[scheduler]` overrides.
 
         Returns:
             A fully resolved, immutable configuration.
@@ -254,6 +307,9 @@ class AgentDXConfig:
                 _resolve(PrivacyConfig(), "privacy", path, environment, privacy)
             ),
             llm=_coerce_llm(_resolve(LlmConfig(), "llm", path, environment, llm)),
+            scheduler=_coerce_scheduler(
+                _resolve(SchedulerConfig(), "scheduler", path, environment, scheduler)
+            ),
         )
 
 
@@ -261,7 +317,7 @@ class AgentDXConfig:
 # Resolution helpers
 # ---------------------------------------------------------------------------------------
 
-_Section = TypeVar("_Section", StoreConfig, RunConfig, PrivacyConfig, LlmConfig)
+_Section = TypeVar("_Section", StoreConfig, RunConfig, PrivacyConfig, LlmConfig, SchedulerConfig)
 
 
 def _slots_of(section: _Section) -> tuple[str, ...]:  # noqa: UP047  # D-08
@@ -478,6 +534,51 @@ def _coerce_llm(raw: LlmConfig) -> LlmConfig:
     )
 
 
+def _coerce_scheduler(raw: SchedulerConfig) -> SchedulerConfig:
+    """Return `raw` with every `[scheduler]` field coerced to its declared type and checked.
+
+    Raises:
+        ConfigError: a value could not be coerced, or a duration/budget is not positive.
+    """
+    return SchedulerConfig(
+        strict_determinism=_as_bool(raw.strict_determinism, "strict_determinism", "scheduler"),
+        step_budget=_positive_in(
+            _as_int(raw.step_budget, "step_budget", "scheduler"), "step_budget", "scheduler"
+        ),
+        calibration_llm_ms=_positive_in(
+            _as_int(raw.calibration_llm_ms, "calibration_llm_ms", "scheduler"),
+            "calibration_llm_ms",
+            "scheduler",
+        ),
+        calibration_tool_ms=_positive_in(
+            _as_int(raw.calibration_tool_ms, "calibration_tool_ms", "scheduler"),
+            "calibration_tool_ms",
+            "scheduler",
+        ),
+        calibration_agent_step_ms=_positive_in(
+            _as_int(raw.calibration_agent_step_ms, "calibration_agent_step_ms", "scheduler"),
+            "calibration_agent_step_ms",
+            "scheduler",
+        ),
+    )
+
+
+def _positive_in(value: int, key: str, section: str) -> int:
+    """Return `value` unchanged if it is >= 1, naming the *correct* section in the error.
+
+    A section-parametrised sibling of `_positive`, which hardcodes `[store]` in its message.
+    `_positive` is P03 code AGENTS.md §2 forbids refactoring opportunistically; this is a
+    new function for a new section rather than a repair of an existing one.
+
+    Raises:
+        ConfigError: the value is zero or negative.
+    """
+    if value < 1:
+        detail = f"[{section}] {key} must be >= 1, got {value}"
+        raise ConfigError(detail)
+    return value
+
+
 def _as_int(value: object, key: str, section: str = "store") -> int:
     """Return `value` as an int, accepting the string form an env var necessarily has.
 
@@ -649,5 +750,6 @@ __all__ = [
     "LlmConfig",
     "PrivacyConfig",
     "RunConfig",
+    "SchedulerConfig",
     "StoreConfig",
 ]

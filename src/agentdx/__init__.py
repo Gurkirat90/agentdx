@@ -34,11 +34,11 @@ Groups 1 and 2 require **zero changes to prompt or agent logic** (PRD §8.2's de
 constraint). Groups 3 and 4 are optional refinements that *reduce* false positives; the
 product is useful without them.
 
-**Two symbols named elsewhere in the project are not here yet.** `agentdx.wall_time()` — the
-single sanctioned real-clock accessor of AGENTS.md §4.1 clause 3 — and `agentdx.sorted_set()`
-belong to the runtime, which lands at P06 (CONTEXT.md deviation D-16). Nothing in `sdk/`
-needs either: the SDK reads time only through the injected `Clock`, and it sorts explicitly
-at every emission site rather than iterating a set.
+**`agentdx.wall_time()` and `agentdx.sorted_set()`** are the two symbols AGENTS.md §4.1
+clause 3 and PRD §10.5 name but that had no home until `runtime/` landed at P06 (closes
+CONTEXT.md deviation D-16). Nothing in `sdk/` calls either: the SDK reads time only through
+the injected `Clock`, and it sorts explicitly at every emission site rather than iterating a
+set. `events/writer.py`'s §27.3 wall-clock flush timer is `wall_time()`'s first real caller.
 
 **`send`/`recv` are here because PRD §8.4 requires them.** Message passing in generic mode is
 explicit, and that is a trade-off rather than an oversight: without an explicit send/recv pair
@@ -56,6 +56,8 @@ from agentdx.config import (
     RunConfig,
     StoreConfig,
 )
+from agentdx.runtime.clock import wall_time
+from agentdx.runtime.determinism import sorted_set
 from agentdx.sdk.decorators import agent, tool
 from agentdx.sdk.generic import (
     AgentContext,
@@ -145,7 +147,9 @@ __all__ = [
     "recv",
     "run",
     "send",
+    "sorted_set",
     "state",
     "tool",
     "transaction",
+    "wall_time",
 ]

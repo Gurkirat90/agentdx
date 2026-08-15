@@ -38,6 +38,12 @@ redact_patterns = ["sk-[A-Za-z0-9]{20,}", "AKIA[0-9A-Z]{16}"]
 strict_determinism = true      # abort on determinism leaks (I1)
 step_budget = 100000
 
+# Q-43.2.3 wall-clock calibration defaults (PRD §10.4), used when no calibration profile
+# entry exists for a span's (agent_id, kind, name). Integer milliseconds only (ADR-007).
+calibration_llm_ms = 800
+calibration_tool_ms = 200
+calibration_agent_step_ms = 50
+
 [llm]
 provider = "groq"
 model = "llama-3.1-8b-instant"

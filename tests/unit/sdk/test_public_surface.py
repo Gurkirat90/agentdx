@@ -71,7 +71,22 @@ def test_run_signature_matches_the_prd_example() -> None:
         assert expected in parameters
 
 
-def test_the_sdk_exports_no_wall_clock_accessor() -> None:
-    # AGENTS.md §4.1 clause 3 names `agentdx.wall_time()` and CONTEXT.md D-16 assigns it to
-    # P06. If it appears here before then, the SDK has acquired a real clock it must not have.
-    assert not hasattr(agentdx, "wall_time")
+def test_the_wall_clock_accessor_landed_at_p06_and_returns_an_int() -> None:
+    # AGENTS.md §4.1 clause 3 names `agentdx.wall_time()`; CONTEXT.md D-16 assigned it to
+    # P06, which is where it now lives (runtime/clock.py, re-exported here). Before P06 this
+    # test asserted the opposite — that it did NOT exist — so that the SDK could not acquire
+    # a real clock early. Now that it is built, the regression this guards against is the
+    # accessor silently returning a float (ADR-007: no floats in anything that could reach
+    # the event log — `wall_ts_ms` is populated straight from this return value).
+    assert hasattr(agentdx, "wall_time")
+    value = agentdx.wall_time()
+    assert isinstance(value, int)
+    assert not isinstance(value, bool)
+    assert value > 0
+
+
+def test_the_sorted_set_helper_landed_at_p06() -> None:
+    # Same story as wall_time(): PRD §10.5 names `agentdx.sorted_set()` as the replacement
+    # for iterating a bare `set`; CONTEXT.md D-16 assigned it to P06 alongside wall_time().
+    assert hasattr(agentdx, "sorted_set")
+    assert agentdx.sorted_set({3, 1, 2}) == [1, 2, 3]
