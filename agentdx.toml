@@ -49,6 +49,17 @@ provider = "groq"
 model = "llama-3.1-8b-instant"
 base_url = "https://api.groq.com/openai/v1"
 
+[cache]
+# PRD §11.9: a separate file from the event store (0600 permissions, applied in code — not
+# a tunable, so not listed here).
+db_filename = "cache.db"
+
+# Design constraint 2: how many "closest stored key" candidates a replay-mode miss lists,
+# and how many recent entries the diagnostic scans to find them. Legibility choices, not
+# measured ones (docs/cache.md).
+miss_diagnostic_candidates = 5
+miss_diagnostic_scan_limit = 200
+
 [analysis]
 residual_tolerance = 0.02      # gate G5: Σ(six buckets) + residual = virtual makespan
 redundancy = "exact_hash"      # exact_hash only in v1 (43.3.2)

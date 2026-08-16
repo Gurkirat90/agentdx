@@ -205,6 +205,41 @@ class LlmConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CacheConfig:
+    """The `[cache]` table of PRD §8.7 — the LLM record/replay/perturb cache's tunables (P07).
+
+    Guarantees: `db_filename` and the two miss-diagnostic bounds are the only numbers
+    `runtime/cache/` holds outside this file (AGENTS.md §4, tripwire 5). Declared here
+    following the D-12/D-20/D-38 precedent: `config.py` is not in P07's `DELIVERABLES`, but
+    every prior prompt that landed a new runtime section extended this module the same way,
+    once its own consumer existed to read it.
+    """
+
+    db_filename: str = "cache.db"
+    """PRD §11.9: a separate file from the event store, so it can be excluded from sharing
+    independently (`0600` permissions, applied by `runtime/cache/store.py`, not read from
+    here — a permission mode is not a tunable threshold)."""
+
+    miss_diagnostic_candidates: int = 5
+    """How many "closest stored key" candidates the replay-mode hard error lists (design
+    constraint 2). PRD §11.7 does not name a count; 5 is a legibility choice, not a measured
+    one, and is documented as such in `docs/cache.md`."""
+
+    miss_diagnostic_scan_limit: int = 200
+    """The nearest-key diagnostic is a debugging aid, not a hot path — this bounds how many
+    stored entries it edit-distance-compares against (most recent first), so a large cache
+    cannot make a miss message itself slow."""
+
+    def with_overrides(self, **kwargs: object) -> CacheConfig:
+        """Return a copy with the non-None keyword arguments applied.
+
+        Raises:
+            ConfigError: a keyword names a field this section does not have.
+        """
+        return _apply(self, "cache", kwargs)
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulerConfig:
     """The `[scheduler]` table of PRD §8.7 — the cooperative scheduler's tunables (P06).
 
@@ -260,6 +295,7 @@ class AgentDXConfig:
     privacy: PrivacyConfig = PrivacyConfig()
     llm: LlmConfig = LlmConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
+    cache: CacheConfig = CacheConfig()
 
     @classmethod
     def load(
@@ -272,6 +308,7 @@ class AgentDXConfig:
         privacy: Mapping[str, object] | None = None,
         llm: Mapping[str, object] | None = None,
         scheduler: Mapping[str, object] | None = None,
+        cache: Mapping[str, object] | None = None,
     ) -> AgentDXConfig:
         """Resolve configuration through the PRD §8.7 precedence chain.
 
@@ -290,6 +327,7 @@ class AgentDXConfig:
             privacy: Per-call `[privacy]` overrides.
             llm: Per-call `[llm]` overrides.
             scheduler: Per-call `[scheduler]` overrides.
+            cache: Per-call `[cache]` overrides.
 
         Returns:
             A fully resolved, immutable configuration.
@@ -310,6 +348,7 @@ class AgentDXConfig:
             scheduler=_coerce_scheduler(
                 _resolve(SchedulerConfig(), "scheduler", path, environment, scheduler)
             ),
+            cache=_coerce_cache(_resolve(CacheConfig(), "cache", path, environment, cache)),
         )
 
 
@@ -317,7 +356,9 @@ class AgentDXConfig:
 # Resolution helpers
 # ---------------------------------------------------------------------------------------
 
-_Section = TypeVar("_Section", StoreConfig, RunConfig, PrivacyConfig, LlmConfig, SchedulerConfig)
+_Section = TypeVar(
+    "_Section", StoreConfig, RunConfig, PrivacyConfig, LlmConfig, SchedulerConfig, CacheConfig
+)
 
 
 def _slots_of(section: _Section) -> tuple[str, ...]:  # noqa: UP047  # D-08
@@ -563,6 +604,27 @@ def _coerce_scheduler(raw: SchedulerConfig) -> SchedulerConfig:
     )
 
 
+def _coerce_cache(raw: CacheConfig) -> CacheConfig:
+    """Return `raw` with every `[cache]` field coerced to its declared type and checked.
+
+    Raises:
+        ConfigError: `db_filename` is empty, or a diagnostic bound is not positive.
+    """
+    return CacheConfig(
+        db_filename=_as_text(raw.db_filename, "db_filename", "cache"),
+        miss_diagnostic_candidates=_positive_in(
+            _as_int(raw.miss_diagnostic_candidates, "miss_diagnostic_candidates", "cache"),
+            "miss_diagnostic_candidates",
+            "cache",
+        ),
+        miss_diagnostic_scan_limit=_positive_in(
+            _as_int(raw.miss_diagnostic_scan_limit, "miss_diagnostic_scan_limit", "cache"),
+            "miss_diagnostic_scan_limit",
+            "cache",
+        ),
+    )
+
+
 def _positive_in(value: int, key: str, section: str) -> int:
     """Return `value` unchanged if it is >= 1, naming the *correct* section in the error.
 
@@ -746,6 +808,7 @@ __all__ = [
     "DEFAULT_CONFIG_FILENAME",
     "ENV_PREFIX",
     "AgentDXConfig",
+    "CacheConfig",
     "ConfigError",
     "LlmConfig",
     "PrivacyConfig",
