@@ -1,0 +1,23 @@
+scenario: reviewer_crash_midflight
+# PRD §21.2's [SOURCE] task path (`fixtures/tasks/refactor_module.md`) is under `fixtures/tasks/`,
+# a directory shared by multiple fixtures, not itself a fixture — target.fixture cannot be
+# inferred from it (C-13, CONTEXT.md §10; fixed 2026-08-16 after an OP-2 audit found the
+# previously-shipped `fixtures/code_pipeline/refactor_module.md` path here pointed at a file
+# that does not exist on disk). target is set explicitly instead, naming the fixture this task
+# and the `reviewer` agent it targets actually live in.
+task: fixtures/tasks/refactor_module.md
+target: {fixture: code_pipeline}
+seed: 42
+hypothesis:
+  task_success: ">= 0.9"
+  p95_virtual_duration_ms: "<= 45000"
+faults:
+  - type: agent_crash
+    agent: reviewer
+    at_virtual_ts: 2400
+guards:
+  max_virtual_duration_ms: 120000
+  max_tokens: 200000
+assertions:
+  - no_state_conflicts
+  - speedup_vs_baseline: ">= 1.0"

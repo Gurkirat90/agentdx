@@ -1,0 +1,112 @@
+# verdict_rules.toml — every threshold and weight P11's three modules use.
+#
+# CONTEXT.md §3 (locked decision): "Thresholds & weights | src/agentdx/analysis/verdict_rules.toml
+# — versioned, printable via `agentdx analyze --explain`. No threshold inline in code." AGENTS.md
+# §4 / CONTEXT.md §11 tripwire 5 forbid a magic number anywhere in `analysis/baseline.py`,
+# `analysis/verdict.py` or `analysis/resilience.py` — every number those three files compare a
+# measurement against lives here, and only here. `--explain` itself is a P17 CLI surface (not yet
+# built, same "declared, unwired" gap as every P06-P09 config file before its own CLI command
+# existed — see docs/baseline-methodology.md §6); `verdict.load_verdict_rules()` is what a future
+# `--explain` command calls, and `tests/analysis/test_verdict_rules_toml.py` proves this file
+# round-trips through it today, gate or no gate.
+#
+# Changing a number here changes a published verdict, comparability grade or resilience score —
+# CONTEXT.md §11 tripwire 17 fires if that shift is not accompanied by a §9/§10 ledger entry.
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------------------------
+# PRD §17.5 — baseline comparability grading
+# ---------------------------------------------------------------------------------------------
+[comparability]
+# `cache_reuse_rate` is baseline.py's call-count-weighted (tool + llm) reuse fraction.
+grade_a_min_cache_reuse = 0.80
+grade_b_min_cache_reuse = 0.40
+# Below grade_b_min_cache_reuse (or a model/tool mismatch, or a failed baseline) the grade is C
+# regardless of reuse — PRD §17.5's row is a disjunction, not a second threshold.
+
+# ---------------------------------------------------------------------------------------------
+# PRD §17.2 — baseline generation. `heuristic_step_budget` has no PRD formula (a genuine,
+# PRD-silent, non-blocking point — see baseline.py's module docstring, "Step budget, ruled").
+# ---------------------------------------------------------------------------------------------
+[baseline]
+step_budget_multiplier = 2.0
+step_budget_floor = 4
+
+# ---------------------------------------------------------------------------------------------
+# PRD §18.1 — verdict class triggers
+# ---------------------------------------------------------------------------------------------
+[verdict.classes]
+beneficial_min_speedup = 1.15
+neutral_min_speedup = 0.95
+coordination_bottleneck_edge_cp_share = 0.40
+coordination_bottleneck_agent_cp_share = 0.60
+unreliable_topology_max_resilience = 60
+insufficient_data_min_agents = 2
+insufficient_data_min_spans = 5
+insufficient_data_max_residual_fraction = 0.20
+
+# ---------------------------------------------------------------------------------------------
+# PRD §18.2 — the 0-100 coordination score. Weights are the PRD's own literal values
+# (40 + 25 + 25, minus up to 25) — not rebalanced to sum to 100, matching the PRD's formula
+# exactly rather than "fixing" an arithmetic choice that isn't this build's to make (Q-43.2.6,
+# CONTEXT.md §10, is OPEN precisely because tuning these against fixtures is real, separate work).
+# ---------------------------------------------------------------------------------------------
+[verdict.score]
+speedup_weight = 40
+efficiency_weight = 25
+reliability_weight = 25
+conflict_penalty_per_finding = 10
+conflict_penalty_max = 25
+
+# ---------------------------------------------------------------------------------------------
+# PRD §18.3 — severity assignment
+# ---------------------------------------------------------------------------------------------
+[verdict.severity]
+coordination_bottleneck_edge_cp_share = 0.40
+redundant_work_medium_fraction = 0.10
+retry_amplification_medium = 2.0
+orchestration_low_fraction = 0.15
+redundancy_low_fraction = 0.10
+
+# ---------------------------------------------------------------------------------------------
+# PRD §18.5 — confidence
+# ---------------------------------------------------------------------------------------------
+[verdict.confidence]
+high_max_residual_fraction = 0.02
+medium_max_residual_fraction = 0.05
+medium_max_instrumentation_gaps = 2
+
+# ---------------------------------------------------------------------------------------------
+# PRD §18.6 — recommendation rule table triggers
+# ---------------------------------------------------------------------------------------------
+[verdict.recommendations]
+merge_edge_cp_share = 0.40
+merge_dst_productive_work_max = 0.25
+# fake_fanout_* are declared, not yet consumed: the fake-fan-out recommendation rule needs a
+# schedule-enumeration input `explore/` (P13) doesn't provide yet — see verdict.py's module
+# docstring "declared, not built" list. Values are the PRD's own numbers, ready to wire.
+fake_fanout_max_parallelism = 1.5
+fake_fanout_min_branches = 3
+orchestration_recommend_fraction = 0.15
+retry_amplification_recommend = 2.0
+token_cost_multiplier_recommend = 3.0
+token_cost_multiplier_speedup_ceiling = 1.2
+
+# ---------------------------------------------------------------------------------------------
+# PRD §19.3, §19.4, §19.6 — resilience scoring
+# ---------------------------------------------------------------------------------------------
+[resilience]
+recovery_budget_multiplier = 2.0
+amplification_budget = 4.0
+success_ratio_weight = 0.50
+recovery_weight = 0.20
+amplification_weight = 0.15
+degradation_weight = 0.15
+silent_failure_cap = 49
+
+[resilience.degradation_weights]
+graceful = 1.0
+degraded_flagged = 0.6
+hard_failure = 0.4
+silent_failure = 0.0

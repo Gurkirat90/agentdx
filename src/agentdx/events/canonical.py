@@ -26,6 +26,7 @@ from typing import Final
 
 from agentdx.events.schema import (
     EVENT_FIELDS,
+    SCHEMA_VERSION,
     Event,
     EventType,
     PayloadValue,
@@ -389,17 +390,41 @@ def decode_event(line: str) -> Event:
     the contract, emission is — and rejects floats so that a hand-edited or foreign log
     cannot smuggle one past `E-EVENT-013`.
 
+    Migrates on read (PRD §9.9, `events/migrations/`) before constructing the `Event`:
+    `check_structural`'s `E-EVENT-008` compares an already-built `Event`'s `schema_version`
+    against the build's `SCHEMA_VERSION` with no tolerance for an older-but-migratable
+    version, so migration must happen here, at the raw-record boundary, not downstream in
+    validation. This is why every committed golden fixture — written at an earlier
+    `SCHEMA_VERSION` — still validates and still hashes without its stored bytes ever
+    changing: `migrate()` returns a new mapping, this function never rewrites the file it
+    read `line` from.
+
     Raises:
         FloatNotPermittedError: the line contains a float (`E-EVENT-013`).
         MalformedEventLineError: a field has the wrong shape (`E-EVENT-015`).
+        SchemaVersionError: `schema_version` is older than this build migrates, newer than
+            this build knows, or missing (`E-EVENT-060`).
         KeyError: a required top-level field is absent.
         ValueError: the line is not valid JSON, or `type` is not a known event type.
     """
     import json
 
+    from agentdx.events import migrations
+
     raw: object = json.loads(line, parse_float=_reject_float)
     if not isinstance(raw, Mapping):
         raise MalformedEventLineError(_NOT_AN_OBJECT)
+    # `migrate()`'s precise `Mapping[str, PayloadValue]` return type is correct but too
+    # narrow for the loose, per-field `int(raw[...])`/`str(raw[...])` coercions below (the
+    # same shape this function already used on `raw` pre-migration, when it was freshly
+    # parsed JSON). Round-tripping through `object` and re-narrowing via `isinstance`
+    # — rather than a `cast(...)` — keeps every field extraction below exactly as it was
+    # before migrate-on-read existed, with no explicit `Any` (AGENTS.md §4, `mypy --strict`'s
+    # `disallow_any_explicit`) anywhere in this function.
+    migrated: object = migrations.migrate(raw, to_version=SCHEMA_VERSION)
+    if not isinstance(migrated, Mapping):  # pragma: no cover — migrate() always returns one
+        raise MalformedEventLineError(_NOT_AN_OBJECT)
+    raw = migrated
     payload = raw["payload"]
     if not isinstance(payload, Mapping):
         raise MalformedEventLineError(_PAYLOAD_NOT_OBJECT)

@@ -261,6 +261,55 @@ class FaultInjectorHook:
             exception: The exception if it raised, else None.
         """
 
+    def fault_id_for(self, draft: DraftEvent, causal_parents: Sequence[int]) -> str | None:
+        """Return the PRD §9.4 taint marker this about-to-be-stamped event should carry.
+
+        Added by P09 (`runtime/faults/`, `CONTEXT.md` D-43) — additive to the P06 hook
+        contract, not a redefinition of it. Called from `_SchedulerRecorder.write`, once per
+        event, after `causal_parents` is computed but before the `Stamp` is built; `Stamp.
+        fault_id` (`events/schema.py`, present since P02, always `None` until this call site
+        existed) is set to this method's return value. The default implementation always
+        returns `None`, so a scheduler built with no fault hook (every P06/P07/P08 caller,
+        unchanged) stamps every event exactly as before — this method is purely additive.
+
+        Args:
+            draft: The event about to be stamped. Not yet an `Event` — no `seq` exists yet.
+            causal_parents: The *declared* causal parent seqs for this exact event — `sorted
+                (set(causes))` if the caller passed explicit `causes` to `stamp`/`emit`, else
+                empty. Deliberately **not** `Scheduler._causal_parents`'s output: that method
+                additionally folds in a synthetic `[seq-1]` linear-chain fallback whenever
+                `causes` is empty, purely to keep the hash-chain/vector-clock (PRD §9.3/§14.2)
+                unbroken — a bookkeeping continuity guarantee, not a causation claim. PRD
+                §9.4 rule 2 means genuinely-declared happens-after edges only; passing the
+                fallback-inclusive value here would taint every `schedule_decision` (always
+                empty `causes`) and any event that merely happens to follow a fault in `seq`
+                order, which is what `Stamp.causal_parents` itself still records (unaffected
+                by this distinction) but must not be what fault taint inherits through.
+
+        Returns:
+            The `fault_id` to stamp, or `None` for no taint. See
+            `runtime.faults.taint.FaultTaintTracker.resolve`, whose signature this method
+            exists to make callable from exactly this one site.
+        """
+        return None
+
+    def on_event_stamped(self, event: Event) -> None:
+        """Called once, immediately after `event` is successfully validated and written.
+
+        Added alongside `fault_id_for` (CONTEXT.md D-43) as its commit-side counterpart: a
+        fault-taint tracker that recorded state inside `fault_id_for` itself would record a
+        seq that might never actually be written (a draft can still fail PRD §9.6 step-3
+        validation after `fault_id_for` returns) — exactly the poisoning `_SchedulerRecorder.
+        write`'s own "pure-compute-then-commit" comment already guards the vclock and seq
+        counter against. This method is that same guarantee extended to fault-taint
+        bookkeeping: called only after `self._writer.write(event)` has already succeeded.
+        Default implementation does nothing.
+
+        Args:
+            event: The fully-stamped, already-persisted event.
+        """
+        return None
+
 
 class CacheHook:
     """Injection point P07 registers to serve cached responses (out of scope until P07).
@@ -367,6 +416,28 @@ class _SchedulerRecorder:
         # Pure computation — nothing is mutated yet.
         tentative_vclock = self._sched._compute_vclock(slot, causes)
         causal = self._sched._causal_parents(seq, causes)
+        # P09 addition (CONTEXT.md D-43): the fault-taint marker (PRD §9.4), resolved by
+        # whatever FaultInjectorHook is installed. The default hook always returns None, so
+        # this is a no-op for every caller that predates P09 (design constraint 1 is
+        # unweakened: this is still the only place a Stamp is built).
+        #
+        # Deliberately NOT `causal`. `_causal_parents` folds in a synthetic `[seq-1]` linear
+        # fallback whenever `causes` is empty — every `schedule_decision` (emitted every
+        # single step) and any SDK/test event stamped with no declared edge — purely so the
+        # hash-chain/vector-clock (PRD §9.3/§14.2) always has a provable predecessor; that
+        # fallback asserts *log continuity*, not causation. PRD §9.4 rule 2 ("inherited from
+        # causal_parents") means the caller-*declared* happens-after edges, not this
+        # bookkeeping artefact — feeding `causal` in here would taint every scheduler-internal
+        # event and any log-adjacent-but-unrelated event that follows a fault, which is
+        # observably indistinguishable from a time window and violates the mission's own
+        # "a concurrent unrelated branch does not [carry fault_id]" requirement (confirmed via
+        # gate G4's harness: a bystander agent's own event, stamped with no `causes`, inherited
+        # taint solely because it was next in `seq` order — see docs/chaos-safety.md §"Declared
+        # vs. linear-fallback causal parents"). `causal` itself — fallback intact — is still
+        # exactly what is written to `Stamp.causal_parents` below; this changes only what the
+        # fault hook is shown, nothing about the persisted event, vclock or hash chain.
+        declared_causal = sorted(set(causes)) if causes else []
+        fault_id = self._sched._fault_hook.fault_id_for(draft, declared_causal)
 
         stamp = Stamp(
             seq=seq,
@@ -375,6 +446,7 @@ class _SchedulerRecorder:
             wall_ts_ms=wall_time(),
             vclock=tentative_vclock,
             causal_parents=causal,
+            fault_id=fault_id,
         )
         event = Event.from_draft(draft, stamp, self._run_id)
         validate_event(event, self._writer._previous)
@@ -384,6 +456,11 @@ class _SchedulerRecorder:
         self._next_seq_val = seq + 1
         self._sched._commit_vclock(slot, tentative_vclock)
         self._sched._event_vclocks[seq] = tentative_vclock
+        # P09 addition (CONTEXT.md D-43): mirrors the vclock commit's own "only after success"
+        # discipline — the fault hook's taint bookkeeping (if any) must not record a seq that
+        # was never actually written, so it is told about the event only here, after
+        # `self._writer.write` has already succeeded, never inside `fault_id_for` itself.
+        self._sched._fault_hook.on_event_stamped(event)
         return event
 
     def emit(self, draft: DraftEvent, causes: Sequence[int]) -> int:

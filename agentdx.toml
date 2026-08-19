@@ -63,3 +63,31 @@ miss_diagnostic_scan_limit = 200
 [analysis]
 residual_tolerance = 0.02      # gate G5: Σ(six buckets) + residual = virtual makespan
 redundancy = "exact_hash"      # exact_hash only in v1 (43.3.2)
+
+[scenario]
+# P08 Design Constraint 2 / P09's "cannot receive an unbounded fault request": PRD §13.6
+# gives default guard *values* (below, as guard_default_*) but no hard ceiling a scenario
+# author cannot exceed. validate.py's E-SCEN-008 reads guard_ceiling_* here rather than
+# hardcoding them (AGENTS.md §4: thresholds live in config, never inline) — CONTEXT.md D-41.
+guard_default_max_virtual_duration_ms = 120000
+guard_default_max_tokens = 200000
+guard_default_max_retries = 20
+guard_default_max_wall_duration_s = 300
+guard_default_max_events = 500000
+guard_default_max_llm_calls = 500
+
+# 10x the PRD default, chosen so a scenario author has real headroom before hitting the
+# ceiling while still being unable to declare an unbounded run. Not measured against any
+# real workload yet — revisit once P09's fault execution has run traffic to tune against.
+guard_ceiling_max_virtual_duration_ms = 1200000
+guard_ceiling_max_tokens = 2000000
+guard_ceiling_max_retries = 200
+guard_ceiling_max_wall_duration_s = 3600
+guard_ceiling_max_events = 5000000
+guard_ceiling_max_llm_calls = 5000
+
+# PRD §21.6: "run in the sandbox, with a time limit (5 s wall)" — applies to both the
+# `type: python` and `type: shell` success_check forms. OP-3 repair (2026-08-16, second
+# independent OP-2 finding #6): previously an inline `_SHELL_TIMEOUT_S = 5` literal in
+# assertions.py, the same magic-number pattern D-41 already fixed for the guard_* keys above.
+success_check_timeout_s = 5

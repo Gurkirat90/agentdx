@@ -1,0 +1,49 @@
+# scenarios/kill_reviewer.yaml — gate G4 (CONTEXT.md §6): "Killing `reviewer` at t=3000
+# reproduces the same failure class and cascade shape, 20/20."
+#
+# `agentdx scenario run scenarios/kill_reviewer.yaml --repeat 20` is the gate's verification
+# command; `--repeat` is a CLI-level rerun count (P17, out of scope here), not this file's
+# `repeats:` field, which governs executions *per phase* within a single scheduler run
+# (PRD §21.1). This scenario only needs to be valid and to declare the fault G4 exercises —
+# reproducing 20/20 identical outcomes is what invariant I1 (determinism, gate G3) already
+# guarantees for any fixed scenario + seed, and is what the gate's own harness checks for.
+version: 1
+scenario: kill_reviewer
+description: >-
+  reviewer is crashed mid-flight, non-recoverable, at t=3000ms. Exercises the supervisor's
+  timeout/retry path and the cascade into tester (PRD §12.2 process-class agent_crash:
+  "Supervisor timeout/retry path exercised; retry bucket grows; possible cascade").
+
+target:
+  fixture: code_pipeline
+
+task: fixtures/tasks/refactor_module.md
+seed: 42
+
+hypothesis:
+  task_success: ">= 0.9"
+  p95_virtual_duration_ms: "<= 45000"
+
+faults:
+  - type: agent_crash
+    agent: reviewer
+    at_virtual_ts: 3000
+    recoverable: false
+
+guards:
+  max_virtual_duration_ms: 120000
+  max_tokens: 200000
+  max_retries: 20
+
+success_check:
+  type: python
+  ref: "fixtures.code_pipeline.checks:task_success"
+
+assertions:
+  - no_silent_failures
+  - deterministic_replay
+  # count: 1, not 0 — code_pipeline's own seeded G1 defect (a critical lost_update on
+  # draft.module_a, fixtures/code_pipeline/golden_findings.json) is present independently of
+  # this scenario's fault, so a count of 0 here would be guaranteed to fail once real
+  # analysis exists, for a reason unrelated to what this scenario is actually testing.
+  - max_findings: {severity: critical, count: 1}

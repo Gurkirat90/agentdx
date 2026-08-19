@@ -22,8 +22,22 @@ from agentdx.events.validators import validate_log
 
 GOLDEN = pathlib.Path(__file__).parents[2] / "golden" / "event_log_40.jsonl"
 
-GOLDEN_HASH = "blake2b:cc612ca8fbb67b5ea9f682f5203bd8052d4b8dcadc11eb7a8570504e10a01f74"
-"""Pinned canonical hash. Changing this line requires the instruction that changed the log."""
+GOLDEN_HASH = "blake2b:badcb6b2d3af20e91a7571bf6703836f4bb5fb5e1cea6a751ae1062611cae295"
+"""Pinned canonical hash. Changing this line requires the instruction that changed the log.
+
+**This is that kind of change, and it is not a golden-file regeneration (AGENTS.md §5).**
+`event_log_40.jsonl`'s committed bytes are untouched — every event in it is still written
+at its original `schema_version=1`, byte for byte. What changed is `decode_event`'s
+*interpretation* of those bytes: P09 OP-3 repair (D-45) wired migrate-on-read in, so a v1
+record now decodes to an in-memory `Event` with `schema_version=2` (`events/migrations`'s
+v1->v2 step). `schema_version` is a `Volatility.STABLE`, canonically-hashed field
+(`events/schema.py`), so that one-field change necessarily moves the hash of every event
+in every fixture — this is the fixture text agreeing with itself under the new, still-
+correct interpretation, not new content. Recomputed directly from the committed file via
+`canonical_log_hash([decode_event(line) for line in GOLDEN.read_text().splitlines() if
+line])` after the migration landed; no call to `fixtures_runner.regenerate_all` or any
+other write to `event_log_40.jsonl` was made to produce this value.
+"""
 
 
 @pytest.fixture(scope="module")

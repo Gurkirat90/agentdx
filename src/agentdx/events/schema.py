@@ -47,11 +47,18 @@ class ValueEnum(str, Enum):  # noqa: UP042  # D-08: is `StrEnum` on a 3.12 toolc
 # Schema version
 # ---------------------------------------------------------------------------------------
 
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 """The event-contract version this build writes (PRD §9.9).
 
 A single integer. Analysers support this version and one previous, via the migration
 harness in `events/migrations/`. Bumping this without an ADR is CONTEXT.md §11 tripwire 6.
+
+Bumped 1 -> 2 at P09 OP-3 repair (D-45, closed by the row that supersedes it in
+CONTEXT.md §9) to add `"aborted_guard"` to `run_end.payload.status`'s enum — see that
+field's `FieldSpec` below. `events/migrations/__init__.py` carries the v1->v2 step
+(purely additive: stamps `schema_version=2` on an old record, changes nothing else), and
+`events/canonical.py::decode_event` applies it on read, so every committed golden fixture
+keeps validating at its original bytes with no golden-file regeneration.
 """
 
 
@@ -526,8 +533,14 @@ PAYLOAD_SCHEMAS: Final[Mapping[EventType, tuple[FieldSpec, ...]]] = {
             "status",
             FieldType.STR,
             Volatility.STABLE,
-            enum=frozenset({"complete", "failed", "aborted", "timeout"}),
+            enum=frozenset({"complete", "failed", "aborted", "timeout", "aborted_guard"}),
             derived=True,
+            doc=(
+                "`aborted_guard` added at schema_version 2 (P09 OP-3 repair, D-45): the "
+                "PRD §13.6 abort-guard outcome the scheduler's `RunState.ABORTED_GUARD` "
+                "already distinguished from a plain `failed` run — see "
+                "`runtime/scheduler.py::Scheduler.run`'s `except AbortGuardTripped` branch."
+            ),
         ),
         FieldSpec("virtual_makespan_ms", FieldType.INT, Volatility.STABLE, derived=True),
         FieldSpec(

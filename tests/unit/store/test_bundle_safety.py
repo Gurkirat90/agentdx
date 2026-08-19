@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from agentdx.events.schema import Event
+from agentdx.events.schema import SCHEMA_VERSION, Event
 from agentdx.store import bundle as bundles
 from agentdx.store.sqlite import Store
 
@@ -152,13 +152,22 @@ def test_an_internally_inconsistent_bundle_is_detected(exported: Path, tmp_path:
 
 
 def test_an_incompatible_schema_version_is_reported(exported: Path, tmp_path: Path) -> None:
-    """`E-BUNDLE-002`: a bundle from a different event schema names both versions."""
+    """`E-BUNDLE-002`: a bundle from a different event schema names both versions.
+
+    Replaces the *current* `SCHEMA_VERSION`, not a hardcoded `1` — pinning the literal
+    would have silently stopped matching (and silently stopped forging a bad bundle) the
+    moment `SCHEMA_VERSION` moved off 1, per P09 OP-3 repair's D-45.
+    """
     with zipfile.ZipFile(exported, "r") as archive:
         manifest = archive.read(bundles.MANIFEST).decode("utf-8")
     forged = _rewrite(
         exported,
         tmp_path / "future.agentdx",
-        {bundles.MANIFEST: manifest.replace('"schema_version":1', '"schema_version":99')},
+        {
+            bundles.MANIFEST: manifest.replace(
+                f'"schema_version":{SCHEMA_VERSION}', '"schema_version":99'
+            )
+        },
     )
     result = bundles.verify(forged)
     assert not result.ok

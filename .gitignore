@@ -45,3 +45,8 @@ ci-out/
 .idea/
 .vscode/
 *.swp
+
+# Cross-session transfer artifacts — never real project content
+_incoming/
+_to_delete/
+*.tar.gz

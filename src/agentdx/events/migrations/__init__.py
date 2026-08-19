@@ -14,9 +14,11 @@ since the chain covers the bytes as recorded, not as interpreted.
   Removing a field, changing a field's meaning, or removing an event type requires a
   version bump *and* a migration registered here.
 
-**This registry is intentionally empty.** `SCHEMA_VERSION` is 1 and no version 0 was ever
-written. The harness exists now, before the end-of-week-1 freeze, because the first time it
-is needed will be the worst time to design it.
+**The registry carried its first entry at P09 OP-3 repair (D-45).** `SCHEMA_VERSION` went
+1 -> 2 to add `"aborted_guard"` to `run_end.payload.status`'s enum (`events/schema.py`).
+The harness existed empty since before the end-of-week-1 freeze specifically so that this
+first real migration would slot into an already-designed, already-tested seam rather than
+be designed under pressure at the moment it was first needed.
 """
 
 from __future__ import annotations
@@ -29,8 +31,20 @@ from agentdx.events.schema import SCHEMA_VERSION, PayloadValue
 EventRecord: TypeAlias = Mapping[str, PayloadValue]  # noqa: UP040  # D-08
 Migration: TypeAlias = Callable[[EventRecord], EventRecord]  # noqa: UP040  # D-08
 
-MIGRATIONS: Final[Mapping[int, Migration]] = {}
-"""`n -> migrate_v{n}_to_v{n+1}`. Empty by design; see the module docstring.
+
+def _migrate_v1_to_v2(record: EventRecord) -> EventRecord:
+    """Stamp `schema_version=2`. Purely additive: v2 only widens `run_end.status`'s enum.
+
+    A v1 record was written before `"aborted_guard"` existed as a legal status value, so no
+    v1 record can already hold it — there is nothing for this step to translate, only the
+    version marker itself to advance. Returns a new mapping; the input is never mutated
+    (`migrate`'s own contract).
+    """
+    return {**record, "schema_version": 2}
+
+
+MIGRATIONS: Final[Mapping[int, Migration]] = {1: _migrate_v1_to_v2}
+"""`n -> migrate_v{n}_to_v{n+1}`. See the module docstring for what v1->v2 changes.
 
 A migration takes a decoded record and returns a decoded record. It runs *before* the
 record becomes an `Event`, because an old record need not satisfy the current dataclass.

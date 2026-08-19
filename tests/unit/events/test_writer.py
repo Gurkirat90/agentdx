@@ -247,7 +247,7 @@ class TestChaining:
 
 
 class TestMigrationHarness:
-    """The version policy (PRD §9.9). The registry is intentionally empty."""
+    """The version policy (PRD §9.9). The registry carries its first step, v1->v2."""
 
     def test_a_current_version_record_passes_through_unchanged(self) -> None:
         """A current version record passes through unchanged."""
@@ -266,8 +266,14 @@ class TestMigrationHarness:
         with pytest.raises(SchemaVersionError):
             migrate({"seq": 0})
 
-    def test_the_registry_is_empty_at_schema_version_1(self) -> None:
-        """The registry is empty at schema version 1."""
+    def test_the_registry_carries_the_v1_to_v2_step(self) -> None:
+        """The registry carries exactly the v1->v2 step added at P09 OP-3 repair (D-45).
+
+        Was `assert MIGRATIONS == {}` before `SCHEMA_VERSION` went 1 -> 2 — this is the
+        deliberate update that finding required, not drift: the harness existed empty
+        specifically so its first real entry would land here.
+        """
         from agentdx.events.migrations import MIGRATIONS
 
-        assert MIGRATIONS == {}
+        assert set(MIGRATIONS) == {1}
+        assert callable(MIGRATIONS[1])
