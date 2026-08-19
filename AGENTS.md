@@ -76,7 +76,7 @@ Anything else that needs a clock, an id or a random number takes it from the inj
 ## 6. Evidence discipline
 
 - Every finding, verdict and scorecard number traces to specific event `seq` values. An empty evidence array is a schema failure.
-- **Rule E1, mechanised.** Every statistic published in the README, `docs/`, the UI or a release note carries an inline marker `[bench:<filename>]` naming a committed file in `bench/results/`. A CI job extracts every marker and fails if the file is missing; a second check fails the build on a numeric literal with a `%`, `×`, `ms`, `s` or `fps` unit in `README.md` or `docs/` that has no marker within the same sentence. Without the marker convention, I9 is unenforceable prose — with it, it is a grep.
+- **Rule E1, mechanised.** Every statistic published in the README, `docs/`, the UI or a release note carries an inline marker `[bench:<filename>]` naming a committed file in `bench/results/`. A CI job extracts every marker and fails if the file is missing; a second check fails the build on a numeric literal with a `%`, `×`, `ms`, `s` or `fps` unit in `README.md` or `docs/` that has no marker within the same sentence. Without the marker convention, I9 is unenforceable prose — with it, it is a grep. **`docs/journal/` is exempt** (C-27, `CONTEXT.md` §10): it is `CONTEXT.md` §13's own overflow archive, and `CONTEXT.md` itself has never been a scanned surface — a size-driven rollover that copies a §13 row verbatim into `docs/journal/` must not be what first subjects it to Rule E1.
 - Where the system cannot know something, it says so. "No race detected in the explored schedules" is the honest sentence; "no races" is a lie.
 
 ## 7. Output contract — every response ends with these four blocks

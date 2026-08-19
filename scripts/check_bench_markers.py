@@ -11,7 +11,17 @@ makes it real. Two checks:
 2. **Every marker resolves.** The file a marker names must exist in ``bench/results/``.
 
 ``docs/AgentDX-PRD-v2.md`` is exempt: it is the read-only spec of record (ADR-000), a
-document of design targets and thresholds, not a claim about measured behaviour. Nothing
+document of design targets and thresholds, not a claim about measured behaviour.
+``docs/journal/`` is exempt for a different reason (**C-27**, CONTEXT.md §10): it is
+``CONTEXT.md`` §13's own overflow archive, and ``CONTEXT.md`` itself has never been a
+scanned surface (it is not under ``docs/`` and carries its own append-only/length
+discipline instead, AGENTS.md §10). A §13 row's bare numbers were never subject to Rule
+E1 in their original home; a size-driven rollover that copies that row verbatim into
+``docs/journal/`` must not retroactively fail it purely because of *which file it now
+sits in* — that would punish file-size housekeeping, not an unmeasured claim. This is a
+narrower exemption than the PRD's: it does not cover ``docs/journal/``'s own prose (there
+is none — the file's own header requires every row be copied verbatim, never authored or
+reworded there), only the pre-existing, already-out-of-scope content it archives. Nothing
 else is exempt and there is deliberately no suppression comment — an unmeasured number in
 published prose is the failure mode this exists to prevent (CONTEXT.md §11 tripwire 7).
 
@@ -35,6 +45,10 @@ SCANNED_DIRS = (REPO_ROOT / "docs",)
 SCANNED_SUFFIXES = (".md",)
 
 # ADR-000: the spec of record is read-only and is not a published claim.
+# C-27 (CONTEXT.md §10): docs/journal/ is CONTEXT.md §13's own overflow archive, and
+# CONTEXT.md was never a scanned surface — rolling a row into this directory must not be
+# what first subjects it to Rule E1.
+EXEMPT_DIRS = frozenset({REPO_ROOT / "docs" / "journal"})
 EXEMPT = frozenset({REPO_ROOT / "docs" / "AgentDX-PRD-v2.md"})
 
 # A number followed by one of Rule E1's units. The trailing boundary stops `4 spans` from
@@ -53,6 +67,11 @@ PLACEHOLDER = re.compile(r"^<.*>$")
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
+def _is_under(path: Path, directory: Path) -> bool:
+    """Return whether ``path`` is ``directory`` itself or lives anywhere beneath it."""
+    return path == directory or directory in path.parents
+
+
 def _iter_target_files() -> list[Path]:
     """Return every file Rule E1 applies to, exemptions removed, in a stable order."""
     targets: list[Path] = [path for path in SCANNED_FILES if path.is_file()]
@@ -64,7 +83,14 @@ def _iter_target_files() -> list[Path]:
             for path in directory.rglob("*")
             if path.is_file() and path.suffix in SCANNED_SUFFIXES
         ]
-    return sorted({path for path in targets if path not in EXEMPT})
+    return sorted(
+        {
+            path
+            for path in targets
+            if path not in EXEMPT
+            and not any(_is_under(path, exempt_dir) for exempt_dir in EXEMPT_DIRS)
+        }
+    )
 
 
 def _unmarked_numbers(path: Path) -> list[str]:
