@@ -234,8 +234,8 @@ how large or small the literal transport figure is.
 ### 4.5 Total validation and the configured tolerance
 
 ```python
-assert abs(sum(bucket_ms.values()) + residual_ms - virtual_makespan_ms) <= 1   # E-OVHD-001
-residual_flagged = residual_fraction >= residual_tolerance                      # not an error
+assert abs(sum(bucket_ms.values()) + residual_ms - virtual_makespan_ms) <= 1  # E-OVHD-001
+residual_flagged = residual_fraction >= residual_tolerance  # not an error
 ```
 
 `residual_tolerance` is read from `agentdx.toml`'s `[analysis] residual_tolerance` (default

@@ -165,7 +165,7 @@ This is the suite that carries invariant I12 and PRD §13.4's "enforced at two l
 
 ```python
 # process.py:239, transport.py:175 & 228, dependency.py:128 — all four lines removed
--        safety.reauthorize(armed, self._registry.blast_radius)
+-safety.reauthorize(armed, self._registry.blast_radius)
 ```
 
 ```
@@ -246,8 +246,8 @@ Why it survives: the test that claims to guard this, `test_triggers.py:84 test_p
 live_stream = seeded_stream(7)
 reference_stream = seeded_stream(7)
 for _ in range(10):
-    expected = reference_stream.next_permille() < 500   # the implementation
-    actual = should_fire(armed, virtual_ts_ms=0, stream=live_stream)   # the implementation
+    expected = reference_stream.next_permille() < 500  # the implementation
+    actual = should_fire(armed, virtual_ts_ms=0, stream=live_stream)  # the implementation
     assert actual == expected
 ```
 
