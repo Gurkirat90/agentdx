@@ -91,3 +91,19 @@ guard_ceiling_max_llm_calls = 5000
 # independent OP-2 finding #6): previously an inline `_SHELL_TIMEOUT_S = 5` literal in
 # assertions.py, the same magic-number pattern D-41 already fixed for the guard_* keys above.
 success_check_timeout_s = 5
+
+[explore]
+# PRD §15.1: bounded schedule exploration's tunables. Design Constraint 2 — these are the
+# only defaults; explore/generate.py and explore/reduce.py hold no literal of their own.
+delay_bound_k = 2               # PRD table range 0-5
+schedule_cap_n = 200            # PRD table range 1-10000
+time_budget_s = 120.0           # wall-clock ceiling for one exploration run
+
+# PRD §15.1: delay_bounded | random | replay_set. Only delay_bounded is implemented in P13
+# (docs/exploration.md "What is not built, and why") — declared so a future prompt's config
+# surface does not collide with this one.
+strategy = "delay_bounded"
+
+# Q-43.2.4: sleep sets / full DPOR are adopted only if measured redundant exploration on the
+# fixtures exceeds this fraction — measured, not guessed (docs/exploration.md).
+upgrade_reduction_if_redundancy_over = 0.40

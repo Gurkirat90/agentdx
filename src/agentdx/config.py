@@ -240,6 +240,54 @@ class CacheConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ExploreConfig:
+    """The `[explore]` table — bounded schedule exploration's tunables (P13, PRD §15.1).
+
+    Guarantees: `delay_bound_k`, `schedule_cap_n`, `time_budget_s`, `strategy` and the DPOR
+    upgrade threshold are the only place P13's defaults live; `explore/generate.py` and
+    `explore/reduce.py` hold no literal of their own (AGENTS.md §4, tripwire 5). Declared here
+    following the D-12/D-20/D-38/D-43/D-50 precedent: `config.py` is not in P13's
+    `DELIVERABLES`, but every prior prompt that landed a new tunable surface extended this
+    module the same way, once its own consumer existed to read it.
+    """
+
+    delay_bound_k: int = 2
+    """PRD §15.1 `k`: maximum number of scheduling points at which a delay schedule deviates
+    from the scheduler's default choice. PRD table range: 0-5."""
+
+    schedule_cap_n: int = 200
+    """PRD §15.1 `N`: hard cap on schedules executed in one exploration run. PRD table
+    range: 1-10 000."""
+
+    time_budget_s: float = 120.0
+    """PRD §15.1 `time_budget_s`: wall-clock ceiling for one exploration run. Partial results
+    are reported honestly (`Report.budget_exceeded`), never silently truncated."""
+
+    strategy: str = "delay_bounded"
+    """PRD §15.1: `delay_bounded` | `random` | `replay_set`. `explore/generate.py` implements
+    `delay_bounded` only — `random` is PRD §34.4's comparison baseline for the benchmark
+    suite and `replay_set` replays a fixed, externally-supplied set; neither is built in this
+    prompt (`docs/exploration.md` "What is not built, and why"). Declared here so a future
+    prompt's config surface does not collide with this one."""
+
+    upgrade_reduction_if_redundancy_over: float = 0.40
+    """Q-43.2.4 / `43.2.4` (CONTEXT.md §3 "Exploration reduction"): sleep sets / full DPOR
+    are adopted only if measured redundant exploration on the fixtures exceeds this fraction.
+    `explore/reduce.py`'s independence-based v1 reduction is what is shipped regardless of
+    this value — nothing in this prompt reads it to switch algorithms — it exists so the
+    measured number `docs/exploration.md` reports is compared against a versioned, printable
+    threshold rather than a bare "40%" typed into prose twice."""
+
+    def with_overrides(self, **kwargs: object) -> ExploreConfig:
+        """Return a copy with the non-None keyword arguments applied.
+
+        Raises:
+            ConfigError: a keyword names a field this section does not have.
+        """
+        return _apply(self, "explore", kwargs)
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulerConfig:
     """The `[scheduler]` table of PRD §8.7 — the cooperative scheduler's tunables (P06).
 
@@ -296,6 +344,7 @@ class AgentDXConfig:
     llm: LlmConfig = LlmConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     cache: CacheConfig = CacheConfig()
+    explore: ExploreConfig = ExploreConfig()
 
     @classmethod
     def load(
@@ -309,6 +358,7 @@ class AgentDXConfig:
         llm: Mapping[str, object] | None = None,
         scheduler: Mapping[str, object] | None = None,
         cache: Mapping[str, object] | None = None,
+        explore: Mapping[str, object] | None = None,
     ) -> AgentDXConfig:
         """Resolve configuration through the PRD §8.7 precedence chain.
 
@@ -328,6 +378,7 @@ class AgentDXConfig:
             llm: Per-call `[llm]` overrides.
             scheduler: Per-call `[scheduler]` overrides.
             cache: Per-call `[cache]` overrides.
+            explore: Per-call `[explore]` overrides.
 
         Returns:
             A fully resolved, immutable configuration.
@@ -349,6 +400,9 @@ class AgentDXConfig:
                 _resolve(SchedulerConfig(), "scheduler", path, environment, scheduler)
             ),
             cache=_coerce_cache(_resolve(CacheConfig(), "cache", path, environment, cache)),
+            explore=_coerce_explore(
+                _resolve(ExploreConfig(), "explore", path, environment, explore)
+            ),
         )
 
 
@@ -357,7 +411,14 @@ class AgentDXConfig:
 # ---------------------------------------------------------------------------------------
 
 _Section = TypeVar(
-    "_Section", StoreConfig, RunConfig, PrivacyConfig, LlmConfig, SchedulerConfig, CacheConfig
+    "_Section",
+    StoreConfig,
+    RunConfig,
+    PrivacyConfig,
+    LlmConfig,
+    SchedulerConfig,
+    CacheConfig,
+    ExploreConfig,
 )
 
 
@@ -625,6 +686,49 @@ def _coerce_cache(raw: CacheConfig) -> CacheConfig:
     )
 
 
+def _coerce_explore(raw: ExploreConfig) -> ExploreConfig:
+    """Return `raw` with every `[explore]` field coerced to its declared type and checked.
+
+    Raises:
+        ConfigError: a value could not be coerced, `delay_bound_k`/`schedule_cap_n`/
+            `upgrade_reduction_if_redundancy_over` is outside its PRD-declared range,
+            `time_budget_s` is not positive, or `strategy` is not a recognised name.
+    """
+    return ExploreConfig(
+        delay_bound_k=_in_range(
+            _as_int(raw.delay_bound_k, "delay_bound_k", "explore"),
+            "delay_bound_k",
+            "explore",
+            minimum=0,
+            maximum=5,
+        ),
+        schedule_cap_n=_in_range(
+            _as_int(raw.schedule_cap_n, "schedule_cap_n", "explore"),
+            "schedule_cap_n",
+            "explore",
+            minimum=1,
+            maximum=10_000,
+        ),
+        time_budget_s=_positive_float(
+            _as_float(raw.time_budget_s, "time_budget_s", "explore"),
+            "time_budget_s",
+            "explore",
+        ),
+        strategy=_as_choice(
+            raw.strategy, "strategy", "explore", ("delay_bounded", "random", "replay_set")
+        ),
+        upgrade_reduction_if_redundancy_over=_fraction(
+            _as_float(
+                raw.upgrade_reduction_if_redundancy_over,
+                "upgrade_reduction_if_redundancy_over",
+                "explore",
+            ),
+            "upgrade_reduction_if_redundancy_over",
+            "explore",
+        ),
+    )
+
+
 def _positive_in(value: int, key: str, section: str) -> int:
     """Return `value` unchanged if it is >= 1, naming the *correct* section in the error.
 
@@ -661,6 +765,64 @@ def _as_int(value: object, key: str, section: str = "store") -> int:
             raise ConfigError(detail) from exc
     detail = f"[{section}] {key} must be an integer, got {type(value).__name__}"
     raise ConfigError(detail)
+
+
+def _as_float(value: object, key: str, section: str) -> float:
+    """Return `value` as a float, accepting the string form an env var necessarily has.
+
+    Raises:
+        ConfigError: the value is not a number and is not a string spelling one. `bool` is
+            rejected explicitly for the same reason `_as_int` rejects it.
+    """
+    if isinstance(value, bool):
+        detail = f"[{section}] {key} must be a number, got a boolean"
+        raise ConfigError(detail)
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError as exc:
+            detail = f"[{section}] {key} must be a number, got {value!r}"
+            raise ConfigError(detail) from exc
+    detail = f"[{section}] {key} must be a number, got {type(value).__name__}"
+    raise ConfigError(detail)
+
+
+def _in_range(value: int, key: str, section: str, *, minimum: int, maximum: int) -> int:
+    """Return `value` unchanged if `minimum <= value <= maximum`.
+
+    Raises:
+        ConfigError: the value falls outside the declared range.
+    """
+    if not minimum <= value <= maximum:
+        detail = f"[{section}] {key} must be between {minimum} and {maximum}, got {value}"
+        raise ConfigError(detail)
+    return value
+
+
+def _positive_float(value: float, key: str, section: str) -> float:
+    """Return `value` unchanged if it is strictly greater than zero.
+
+    Raises:
+        ConfigError: the value is zero or negative.
+    """
+    if value <= 0:
+        detail = f"[{section}] {key} must be > 0, got {value}"
+        raise ConfigError(detail)
+    return value
+
+
+def _fraction(value: float, key: str, section: str) -> float:
+    """Return `value` unchanged if it is in `[0.0, 1.0]` — a threshold expressed as a fraction.
+
+    Raises:
+        ConfigError: the value is outside `[0.0, 1.0]`.
+    """
+    if not 0.0 <= value <= 1.0:
+        detail = f"[{section}] {key} must be between 0.0 and 1.0, got {value}"
+        raise ConfigError(detail)
+    return value
 
 
 def _as_bool(value: object, key: str, section: str) -> bool:
@@ -810,6 +972,7 @@ __all__ = [
     "AgentDXConfig",
     "CacheConfig",
     "ConfigError",
+    "ExploreConfig",
     "LlmConfig",
     "PrivacyConfig",
     "RunConfig",
