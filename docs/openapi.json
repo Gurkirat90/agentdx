@@ -1,0 +1,3034 @@
+{
+  "components": {
+    "schemas": {
+      "Body_import_run_api_import_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_run_api_import_post",
+        "type": "object"
+      },
+      "CompareRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/runs/compare` request body (PRD \u00a726.1, `[SOURCE]`).",
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "run_a": {
+            "title": "Run A",
+            "type": "string"
+          },
+          "run_b": {
+            "title": "Run B",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_a",
+          "run_b"
+        ],
+        "title": "CompareRequest",
+        "type": "object"
+      },
+      "CompareResponse": {
+        "additionalProperties": false,
+        "description": "`POST /api/runs/compare` response: metric deltas, finding diff, verdict change.",
+        "properties": {
+          "findings_added": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "title": "Findings Added",
+            "type": "array"
+          },
+          "findings_removed": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "title": "Findings Removed",
+            "type": "array"
+          },
+          "findings_unchanged": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "title": "Findings Unchanged",
+            "type": "array"
+          },
+          "metric_deltas": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDelta"
+            },
+            "title": "Metric Deltas",
+            "type": "array"
+          },
+          "run_a": {
+            "title": "Run A",
+            "type": "string"
+          },
+          "run_b": {
+            "title": "Run B",
+            "type": "string"
+          },
+          "verdict_a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict A"
+          },
+          "verdict_b": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict B"
+          },
+          "verdict_changed": {
+            "title": "Verdict Changed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "run_a",
+          "run_b",
+          "metric_deltas",
+          "findings_added",
+          "findings_removed",
+          "findings_unchanged",
+          "verdict_changed",
+          "verdict_a",
+          "verdict_b"
+        ],
+        "title": "CompareResponse",
+        "type": "object"
+      },
+      "CountsSummary": {
+        "additionalProperties": false,
+        "description": "Real per-run counts: events, spans, messages, LLM calls and tokens.",
+        "properties": {
+          "events": {
+            "title": "Events",
+            "type": "integer"
+          },
+          "llm_calls": {
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "messages": {
+            "title": "Messages",
+            "type": "integer"
+          },
+          "spans": {
+            "title": "Spans",
+            "type": "integer"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "spans",
+          "messages",
+          "llm_calls",
+          "tokens"
+        ],
+        "title": "CountsSummary",
+        "type": "object"
+      },
+      "DeterminismSummary": {
+        "additionalProperties": false,
+        "description": "A run's determinism health: canonical log hash and warning counts.",
+        "properties": {
+          "canonical_log_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Log Hash"
+          },
+          "nondeterminism_warnings": {
+            "title": "Nondeterminism Warnings",
+            "type": "integer"
+          },
+          "unwrapped_tools": {
+            "title": "Unwrapped Tools",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "canonical_log_hash",
+          "unwrapped_tools",
+          "nondeterminism_warnings"
+        ],
+        "title": "DeterminismSummary",
+        "type": "object"
+      },
+      "EventOut": {
+        "additionalProperties": true,
+        "description": "One event, exactly as `events.canonical.encode_event` serialises it.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "causal_parents": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Causal Parents",
+            "type": "array"
+          },
+          "clock_slot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clock Slot"
+          },
+          "fault_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fault Id"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "title": "Payload",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sched_step": {
+            "title": "Sched Step",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Id"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "vclock": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Vclock",
+            "type": "object"
+          },
+          "virtual_ts_ms": {
+            "title": "Virtual Ts Ms",
+            "type": "integer"
+          },
+          "wall_ts_ms": {
+            "title": "Wall Ts Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "run_id",
+          "seq",
+          "sched_step",
+          "virtual_ts_ms",
+          "wall_ts_ms",
+          "vclock",
+          "type",
+          "causal_parents",
+          "payload"
+        ],
+        "title": "EventOut",
+        "type": "object"
+      },
+      "EventsPageResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs/{id}/events` response \u2014 one page, cursor and total.",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "next_from_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next From Seq"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "next_from_seq",
+          "total"
+        ],
+        "title": "EventsPageResponse",
+        "type": "object"
+      },
+      "Evidence": {
+        "additionalProperties": false,
+        "description": "`analysis.verdict.Evidence`, projected (PRD \u00a718.4) \u2014 I6: `event_seqs` non-empty.",
+        "properties": {
+          "computation": {
+            "title": "Computation",
+            "type": "string"
+          },
+          "event_seqs": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Event Seqs",
+            "type": "array"
+          },
+          "span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Span Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event_seqs",
+          "span_ids",
+          "computation"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "ExplorationResponse": {
+        "additionalProperties": false,
+        "description": "PRD \u00a726.1 / \u00a715.6. `coverage_statement` is I10's required, verbatim field.",
+        "properties": {
+          "capped": {
+            "title": "Capped",
+            "type": "boolean"
+          },
+          "coverage_statement": {
+            "title": "Coverage Statement",
+            "type": "string"
+          },
+          "k": {
+            "title": "K",
+            "type": "integer"
+          },
+          "new_findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "title": "New Findings",
+            "type": "array"
+          },
+          "reduced_away": {
+            "title": "Reduced Away",
+            "type": "integer"
+          },
+          "schedules_executed": {
+            "title": "Schedules Executed",
+            "type": "integer"
+          },
+          "unique_schedules": {
+            "title": "Unique Schedules",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "k",
+          "schedules_executed",
+          "unique_schedules",
+          "reduced_away",
+          "new_findings",
+          "capped",
+          "coverage_statement"
+        ],
+        "title": "ExplorationResponse",
+        "type": "object"
+      },
+      "ExploreOptions": {
+        "additionalProperties": false,
+        "description": "PRD \u00a726.1 `POST /api/runs` request body's `explore` object.",
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "ExploreOptions",
+        "type": "object"
+      },
+      "FaultInjectRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/runs/{id}/faults` request body (PRD \u00a726.1, `[SOURCE]`).",
+        "properties": {
+          "params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
+            "title": "Params",
+            "type": "object"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/FaultTrigger"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target"
+        ],
+        "title": "FaultInjectRequest",
+        "type": "object"
+      },
+      "FaultInjectResponse": {
+        "additionalProperties": false,
+        "description": "`202` response of `POST /api/runs/{id}/faults`.",
+        "properties": {
+          "armed_at_virtual_ts": {
+            "title": "Armed At Virtual Ts",
+            "type": "integer"
+          },
+          "fault_id": {
+            "title": "Fault Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fault_id",
+          "armed_at_virtual_ts"
+        ],
+        "title": "FaultInjectResponse",
+        "type": "object"
+      },
+      "FaultTrigger": {
+        "additionalProperties": true,
+        "description": "The `trigger` object of a `POST /api/runs/{id}/faults` request body.",
+        "properties": {
+          "immediate": {
+            "default": false,
+            "title": "Immediate",
+            "type": "boolean"
+          }
+        },
+        "title": "FaultTrigger",
+        "type": "object"
+      },
+      "FindingOut": {
+        "additionalProperties": false,
+        "description": "`store.FindingRecord`, projected.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "title": "Evidence",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "recommendation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation"
+          },
+          "repro_scenario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repro Scenario"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtype"
+          },
+          "suppressed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppressed By"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "subtype",
+          "severity",
+          "title",
+          "description",
+          "evidence",
+          "recommendation",
+          "repro_scenario",
+          "suppressed_by"
+        ],
+        "title": "FindingOut",
+        "type": "object"
+      },
+      "FindingsResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs/{id}/findings` response \u2014 one run's findings, filtered.",
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "title": "Findings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "findings"
+        ],
+        "title": "FindingsResponse",
+        "type": "object"
+      },
+      "GraphEdge": {
+        "additionalProperties": false,
+        "description": "One agent-pair edge of `GET /api/runs/{id}/graph` (PRD \u00a726.1).",
+        "properties": {
+          "cp_handoff_ms": {
+            "title": "Cp Handoff Ms",
+            "type": "integer"
+          },
+          "cp_share": {
+            "title": "Cp Share",
+            "type": "number"
+          },
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "messages": {
+            "title": "Messages",
+            "type": "integer"
+          },
+          "on_critical_path": {
+            "title": "On Critical Path",
+            "type": "boolean"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "total_handoff_ms": {
+            "title": "Total Handoff Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "messages",
+          "total_handoff_ms",
+          "cp_handoff_ms",
+          "cp_share",
+          "on_critical_path"
+        ],
+        "title": "GraphEdge",
+        "type": "object"
+      },
+      "GraphNode": {
+        "additionalProperties": false,
+        "description": "One agent node of `GET /api/runs/{id}/graph` (PRD \u00a726.1).",
+        "properties": {
+          "busy_ms": {
+            "title": "Busy Ms",
+            "type": "integer"
+          },
+          "cp_ms": {
+            "title": "Cp Ms",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "idle_ms": {
+            "title": "Idle Ms",
+            "type": "integer"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "busy_ms",
+          "idle_ms",
+          "cp_ms",
+          "tokens",
+          "status"
+        ],
+        "title": "GraphNode",
+        "type": "object"
+      },
+      "GraphRef": {
+        "additionalProperties": false,
+        "description": "A run's graph identity \u2014 content hash plus the observed agent roster.",
+        "properties": {
+          "agents": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "agents"
+        ],
+        "title": "GraphRef",
+        "type": "object"
+      },
+      "GraphResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs/{id}/graph` response: nodes, edges and the critical path.",
+        "properties": {
+          "critical_path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Critical Path",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "critical_path"
+        ],
+        "title": "GraphResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/health` response (PRD \u00a735).",
+        "properties": {
+          "status": {
+            "const": "ok",
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "ImportResponse": {
+        "additionalProperties": false,
+        "description": "`POST /api/import` response: the newly assigned local `run_id`.",
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "ImportResponse",
+        "type": "object"
+      },
+      "JsonValue-Input": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "JsonValue-Output": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "Metric": {
+        "additionalProperties": false,
+        "description": "`analysis.verdict.Metric`, projected (PRD \u00a718.4).",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit"
+        ],
+        "title": "Metric",
+        "type": "object"
+      },
+      "MetricDelta": {
+        "additionalProperties": false,
+        "description": "One metric's value in each run plus the difference between them.",
+        "properties": {
+          "delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "run_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run A"
+          },
+          "run_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run B"
+          }
+        },
+        "required": [
+          "name",
+          "run_a",
+          "run_b",
+          "delta"
+        ],
+        "title": "MetricDelta",
+        "type": "object"
+      },
+      "Recommendation": {
+        "additionalProperties": false,
+        "description": "One `analysis.verdict.Recommendation`, projected (PRD \u00a718.4).",
+        "properties": {
+          "evidence": {
+            "$ref": "#/components/schemas/Evidence"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger",
+          "text",
+          "evidence"
+        ],
+        "title": "Recommendation",
+        "type": "object"
+      },
+      "RunCreateRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/runs` request body (PRD \u00a726.1, `[SOURCE]`).",
+        "properties": {
+          "explore": {
+            "$ref": "#/components/schemas/ExploreOptions"
+          },
+          "mode": {
+            "enum": [
+              "baseline",
+              "chaos",
+              "replay"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "seed": {
+            "default": 42,
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "mode"
+        ],
+        "title": "RunCreateRequest",
+        "type": "object"
+      },
+      "RunCreateResponse": {
+        "additionalProperties": false,
+        "description": "`202` response of `POST /api/runs`.",
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "ws": {
+            "title": "Ws",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "ws"
+        ],
+        "title": "RunCreateResponse",
+        "type": "object"
+      },
+      "RunDetail": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs/{id}` response (PRD \u00a726.1, `[SOURCE]`).\n\n`verdict` is `None` until the run's scorecard has been computed and persisted \u2014 no\nprompt in this build yet runs the full `timing -> overhead -> redundancy -> race ->\nbaseline -> resilience -> verdict` pipeline and calls `store.upsert_scorecard` (P17,\nnot started; see `docs/api.md` \"What this endpoint does not yet do\"). This is reported\nas `null`, not fabricated and not a 404 \u2014 PRD \u00a736 rule 2, \"partial results beat no\nresults\": the run's own metadata is always real, even when its verdict is not yet in.",
+        "properties": {
+          "baseline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Run Id"
+          },
+          "comparability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparability"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/CountsSummary"
+          },
+          "determinism": {
+            "$ref": "#/components/schemas/DeterminismSummary"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/GraphRef"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/ScenarioRef"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/TimingSummary"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerdictOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "mode",
+          "seed",
+          "scenario",
+          "graph",
+          "timing",
+          "counts",
+          "determinism",
+          "verdict",
+          "baseline_run_id",
+          "comparability"
+        ],
+        "title": "RunDetail",
+        "type": "object"
+      },
+      "RunListResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs` response.",
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "RunListResponse",
+        "type": "object"
+      },
+      "RunSummary": {
+        "additionalProperties": false,
+        "description": "One row of `GET /api/runs`'s `runs` array \u2014 `RunRecord`, projected.",
+        "properties": {
+          "baseline_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Of"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Count"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "replay_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Of"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "scenario_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Id"
+          },
+          "sealed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealed At"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "virtual_makespan_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Virtual Makespan Ms"
+          },
+          "wall_makespan_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Makespan Ms"
+          }
+        },
+        "required": [
+          "run_id",
+          "scenario_id",
+          "status",
+          "mode",
+          "seed",
+          "created_at",
+          "sealed_at",
+          "virtual_makespan_ms",
+          "wall_makespan_ms",
+          "event_count",
+          "baseline_of",
+          "replay_of"
+        ],
+        "title": "RunSummary",
+        "type": "object"
+      },
+      "ScenarioDetail": {
+        "additionalProperties": false,
+        "description": "`GET /api/scenarios/{id}` response: raw content plus its resolved form.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "resolved": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "title": "Resolved",
+            "type": "object"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "store",
+              "file"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "source",
+          "path",
+          "content",
+          "content_hash",
+          "resolved"
+        ],
+        "title": "ScenarioDetail",
+        "type": "object"
+      },
+      "ScenarioListResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/scenarios` response.",
+        "properties": {
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioSummary"
+            },
+            "title": "Scenarios",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenarios"
+        ],
+        "title": "ScenarioListResponse",
+        "type": "object"
+      },
+      "ScenarioRef": {
+        "additionalProperties": false,
+        "description": "Which scenario a run used \u2014 id (if known) plus its resolved content hash.",
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          }
+        },
+        "required": [
+          "id",
+          "hash"
+        ],
+        "title": "ScenarioRef",
+        "type": "object"
+      },
+      "ScenarioSummary": {
+        "additionalProperties": false,
+        "description": "One row of `GET /api/scenarios`'s listing \u2014 store- or file-sourced.",
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "store",
+              "file"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "source",
+          "path",
+          "version"
+        ],
+        "title": "ScenarioSummary",
+        "type": "object"
+      },
+      "ScenarioValidateRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/scenarios/validate` request body.\n\nExactly one of `text` (raw YAML, e.g. from the UI's chaos panel) or `scenario_id` (an\nalready-known scenario, from the store or `scenarios_dir`) must be given.",
+        "properties": {
+          "scenario_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Id"
+          },
+          "source_name": {
+            "default": "<scenario>",
+            "title": "Source Name",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "ScenarioValidateRequest",
+        "type": "object"
+      },
+      "ScenarioValidateResponse": {
+        "additionalProperties": false,
+        "description": "`POST /api/scenarios/validate` response \u2014 always `200`, see the route's docstring.",
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioValidationErrorOut"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "resolved": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue-Output"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "valid",
+          "resolved",
+          "errors"
+        ],
+        "title": "ScenarioValidateResponse",
+        "type": "object"
+      },
+      "ScenarioValidationErrorOut": {
+        "additionalProperties": false,
+        "description": "One `scenario.validate.ScenarioError`, projected.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "docs": {
+            "title": "Docs",
+            "type": "string"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "path",
+          "message",
+          "suggestion",
+          "file",
+          "line",
+          "docs"
+        ],
+        "title": "ScenarioValidationErrorOut",
+        "type": "object"
+      },
+      "ScorecardResponse": {
+        "additionalProperties": true,
+        "description": "PRD \u00a717.4's structure, as persisted (`store.ScorecardRecord.payload`).\n\nPassed through unreshaped: the route serialises what the analysis pipeline wrote, and\ninventing a stricter schema here would be a second, competing opinion of what a\nscorecard contains.",
+        "properties": {},
+        "title": "ScorecardResponse",
+        "type": "object"
+      },
+      "StateKey": {
+        "additionalProperties": false,
+        "description": "One state key's reconstructed value as of a virtual timestamp (PRD \u00a720.4).",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue-Output"
+          },
+          "value_hash": {
+            "title": "Value Hash",
+            "type": "string"
+          },
+          "writer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writer"
+          },
+          "written_at_seq": {
+            "title": "Written At Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "value_hash",
+          "writer",
+          "written_at_seq"
+        ],
+        "title": "StateKey",
+        "type": "object"
+      },
+      "StateResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs/{id}/state` response.",
+        "properties": {
+          "at_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Seq"
+          },
+          "at_virtual_ts": {
+            "title": "At Virtual Ts",
+            "type": "integer"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/StateKey"
+            },
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "at_virtual_ts",
+          "at_seq",
+          "keys"
+        ],
+        "title": "StateResponse",
+        "type": "object"
+      },
+      "TimingSummary": {
+        "additionalProperties": false,
+        "description": "Makespan figures for `GET /runs/{id}` \u2014 virtual, wall and critical-path ms.",
+        "properties": {
+          "critical_path_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Critical Path Ms"
+          },
+          "virtual_makespan_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Virtual Makespan Ms"
+          },
+          "wall_makespan_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Makespan Ms"
+          }
+        },
+        "required": [
+          "virtual_makespan_ms",
+          "wall_makespan_ms",
+          "critical_path_ms"
+        ],
+        "title": "TimingSummary",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerdictFinding": {
+        "additionalProperties": false,
+        "description": "One finding cited by a `Verdict` (PRD \u00a718.4), projected.",
+        "properties": {
+          "claim": {
+            "title": "Claim",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/Evidence"
+          },
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "metric": {
+            "$ref": "#/components/schemas/Metric"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "finding_id",
+          "type",
+          "severity",
+          "claim",
+          "metric",
+          "evidence",
+          "confidence"
+        ],
+        "title": "VerdictFinding",
+        "type": "object"
+      },
+      "VerdictOut": {
+        "additionalProperties": false,
+        "description": "`analysis.verdict.Verdict`, projected \u2014 `GET /runs/{id}`'s `verdict` object (PRD \u00a718).",
+        "properties": {
+          "class": {
+            "title": "Class",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "coordination_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coordination Score"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/Evidence"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/Recommendation"
+            },
+            "title": "Recommendations",
+            "type": "array"
+          },
+          "secondary_classes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Secondary Classes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "class",
+          "secondary_classes",
+          "coordination_score",
+          "confidence",
+          "headline",
+          "findings",
+          "recommendations",
+          "evidence"
+        ],
+        "title": "VerdictOut",
+        "type": "object"
+      },
+      "VersionResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/version` response: package version plus event schema version.",
+        "properties": {
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "schema_version"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      },
+      "WaterfallLane": {
+        "additionalProperties": false,
+        "description": "One agent's lane of spans in a `GET /api/runs/{id}/waterfall` response.",
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/WaterfallSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent",
+          "spans"
+        ],
+        "title": "WaterfallLane",
+        "type": "object"
+      },
+      "WaterfallResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/runs/{id}/waterfall` response: makespans plus every lane.",
+        "properties": {
+          "baseline_makespan_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Makespan Ms"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/WaterfallLane"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
+          "virtual_makespan_ms": {
+            "title": "Virtual Makespan Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "virtual_makespan_ms",
+          "baseline_makespan_ms",
+          "lanes"
+        ],
+        "title": "WaterfallResponse",
+        "type": "object"
+      },
+      "WaterfallSpan": {
+        "additionalProperties": false,
+        "description": "One span row of `GET /api/runs/{id}/waterfall` (PRD \u00a726.1).",
+        "properties": {
+          "bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket"
+          },
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "fault_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fault Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "on_critical_path": {
+            "title": "On Critical Path",
+            "type": "boolean"
+          },
+          "seq_end": {
+            "title": "Seq End",
+            "type": "integer"
+          },
+          "seq_start": {
+            "title": "Seq Start",
+            "type": "integer"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "span_id",
+          "kind",
+          "name",
+          "start_ms",
+          "end_ms",
+          "bucket",
+          "on_critical_path",
+          "status",
+          "fault_id",
+          "seq_start",
+          "seq_end"
+        ],
+        "title": "WaterfallSpan",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "summary": "Multi-agent coordination debugger, deterministic replay runtime and chaos harness \u2014 PRD \u00a726 API layer. Bounded search: absence of findings is not proof of absence.",
+    "title": "AgentDX API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/health": {
+      "get": {
+        "description": "Return `{\"status\": \"ok\"}` if the process can answer at all.",
+        "operationId": "get_health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness probe (PRD Sec35)",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/import": {
+      "post": {
+        "description": "Verify and register an uploaded `.agentdx` bundle; return its local `run_id`.\n\nRaises:\n    BundleError: `400` \u2014 `E-BUNDLE-001` verification failed \u00b7 `E-BUNDLE-002` incompatible\n        schema \u00b7 `E-BUNDLE-005` unsafe archive member \u00b7 `E-BUNDLE-007` a different log\n        already exists under this `run_id` (all handled globally).\n\nDepends on `get_store_async_http`, not the sync `get_store` every other route in this\nmodule uses: this is the one `async def` route here (`UploadFile.read()` is itself\nasync), and a sync generator dependency opens its `sqlite3.Connection` in FastAPI's\nthreadpool while an `async def` route body runs on the event loop thread \u2014 a real,\nempirically-confirmed cross-thread `sqlite3.ProgrammingError` (see `deps.py::\nget_store_async_http`'s own docstring), not a hypothetical one.",
+        "operationId": "import_run_api_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_run_api_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import a `.agentdx` bundle (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "description": "Return the PRD Sec35 metric set as `text/plain; version=0.0.4` (Prometheus exposition).",
+        "operationId": "get_metrics_api_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Self-observability counters, Prometheus text format (PRD Sec35)",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "description": "List runs, newest first, cursor-paginated by `(created_at desc, run_id)` (PRD \u00a726.1).\n\n`Store.list_runs()` returns every run (ordered by `run_id`, not `created_at`) \u2014 there is\nno indexed `created_at`-ordered read to page through (extending `store/` with one is\noutside this prompt's `DELIVERABLES`; see `docs/api.md`). This route re-sorts in Python,\nwhich is O(run count) rather than O(page size) \u2014 acceptable for a `runs` table (hundreds\nto low thousands of rows in realistic local use), unlike the `events` table this same\ntrade-off would be disqualifying for (Design Constraint 6).",
+        "operationId": "list_runs_api_runs_get",
+        "parameters": [
+          {
+            "description": "Filter: exact status match.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter: exact status match.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter: True for fixture-targeted runs, False for user-graph runs.",
+            "in": "query",
+            "name": "fixture",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter: True for fixture-targeted runs, False for user-graph runs.",
+              "title": "Fixture"
+            }
+          },
+          {
+            "description": "Page size.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size.",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque `created_at|run_id` cursor.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque `created_at|run_id` cursor.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List runs (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      },
+      "post": {
+        "description": "Validate, check the concurrency gate, and hand off to the configured `RunLauncher`.\n\nRaises:\n    ScenarioNotFoundError / ScenarioLoadError / ScenarioValidationError: `400`-family \u2014\n        the scenario does not exist or does not validate.\n    TooManyConcurrentRunsError: `409 E-RUN-409`.\n    RunLaunchUnavailableError: `503` \u2014 no `RunLauncher` is configured on this server\n        (CONTEXT.md \u00a77's `RunHost` gap; see this module's docstring).",
+        "operationId": "create_run_api_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start a run (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/compare": {
+      "post": {
+        "description": "Diff two runs' real, available metrics and findings.\n\nRaises:\n    RunNotFoundError: `E-RUN-404` \u2014 either run.\n    CompareIncomparableError: `400 E-CMP-001` \u2014 different scenario hashes, no `force`.\n\n`metric_deltas` covers exactly the numeric fields both runs' own `RunRecord`s carry for\nreal (`virtual_makespan_ms`, `wall_makespan_ms`, `event_count`) \u2014 not a wider metric set,\nbecause nothing in this build computes one (no `analysis.compare`/`diff` module exists;\nDesign Constraint 1: a route needing a missing computation is a declared gap, not\nsomething to invent inline). `verdict_changed`/`verdict_a`/`verdict_b` are always\n`False`/`None`/`None` for the same reason `GET /runs/{id}`'s `verdict` is always `None`\n(P17 gap). Findings are matched across runs by `(type, subtype, severity, title)` \u2014 the\ntwo runs' `finding_id`s are independently generated and never equal, so identity here is\ncontent-based, declared as such rather than silently assumed to be `finding_id` equality.",
+        "operationId": "compare_runs_api_runs_compare_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare two runs (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "description": "Return a run's metadata, real counts and (when computed) its verdict.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n\n`timing.critical_path_ms` is reported as `null`: computing it means building the full\ntiming DAG (`analysis.timing.build_timing_dag` + `critical_path`), the same cost\n`GET .../graph` already pays where the PRD's own example payload needs the number \u2014 this\nendpoint does not additionally pay that cost on every call just to fill one field callers\nneeding it can get from `.../graph` directly. `determinism.unwrapped_tools` is `0` on\nevery run: no event or field anywhere in this codebase currently records it (grepped, not\nassumed) \u2014 a real, declared gap, not a fabricated zero passed off as a real count.",
+        "operationId": "get_run_detail_api_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run metadata + verdict (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "description": "Return one page of a run's event log, streamed rather than materialised.\n\nDesign Constraint 6: never load a 200 000-event run into memory for one page.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n\n`next_from_seq` resumes correctly during a live run: it is the seq immediately after the\nlast event this call *read* (matched or not), so a client that pages to the current end\nand asks again later picks up exactly where new events start, with no gap and no\nduplicate \u2014 the same cursor discipline PRD \u00a726.2 requires of the WebSocket reconnect path.",
+        "operationId": "get_events_api_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "First seq to include, inclusive.",
+            "in": "query",
+            "name": "from_seq",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "First seq to include, inclusive.",
+              "minimum": 0,
+              "title": "From Seq",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, capped at the server max.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, capped at the server max.",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Comma-separated `EventType` values.",
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated `EventType` values.",
+              "title": "Types"
+            }
+          },
+          {
+            "description": "Filter: exact `agent_id` match.",
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter: exact `agent_id` match.",
+              "title": "Agent"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Paginated event log (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/exploration": {
+      "get": {
+        "description": "Return a run's exploration `Report` (PRD \u00a715), including the required `coverage_statement`.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n    NotYetAvailableError: `409` \u2014 always, in this build. `explore.report.Report` is real\n        (P13) but `api/` may not import `agentdx.explore` (`.importlinter`\n        `explore-below-transport-layer`: `explore/` must not import `api/`, and the\n        converse contract, `api-never-imports-runtime`, was written before `explore/`\n        existed and does not list it as permitted either \u2014 confirmed against the actual\n        `.importlinter`, not assumed from the CONTEXT.md \u00a74 table's prose). No prompt\n        persists an exploration `Report` into the store (no table exists for one \u2014 see\n        `docs/api.md`), so there is nothing this route can read regardless. Surfaced\n        plainly rather than fabricated (PRD \u00a736 rule 1).",
+        "operationId": "get_exploration_api_runs__run_id__exploration_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bounded schedule exploration results (PRD \u00a726.1, \u00a715.6)",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/export": {
+      "get": {
+        "description": "Export a sealed run to a self-contained, self-verifying `.agentdx` bundle.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n    BundleError: `400` \u2014 `E-BUNDLE-004` the run has no events (handled globally).\n\nThin: `store.bundle.export_bundle` already resolves `created_at`/`scenario`/\n`agentdx_version` from the store when not given, so this route supplies nothing beyond\n`run_id` and a destination path.",
+        "operationId": "export_run_api_runs__run_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download a run as a `.agentdx` bundle (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/faults": {
+      "post": {
+        "description": "Validate and arm a fault against a running run, via the configured `FaultController`.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n    RunNotRunningError: `409` \u2014 the run is not `running`.\n    UnknownFaultTypeError: `400` \u2014 not in `FAULT_CATALOGUE`, or a declared-but-unshipped\n        P1 fault (CONTEXT.md \u00a73: only the P0 tier executes in this build).\n    FaultTargetNotFoundError: `400 E-FAULT-001` \u2014 only checked when the fault's\n        `target_kinds` is unambiguously `(agent,)`, against the run's real agent roster\n        (`store.list_agent_ids`); edge/tool/state_key/provider targets are not verified\n        (declared gap \u2014 this build has no cheap way to enumerate them without a graph\n        resolution `api/` cannot perform, see this module's docstring).\n    ChaosAuthorizationError: `403 E-CHAOS-001` \u2014 I12/\u00a713.3.\n    FaultControlUnavailableError: `503` \u2014 no `FaultController` configured.",
+        "operationId": "inject_fault_api_runs__run_id__faults_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaultInjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaultInjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inject a fault into a live run (PRD \u00a726.1)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/findings": {
+      "get": {
+        "description": "Return a run's findings, severity/type-filtered, precomputed (PRD \u00a726.1, \u00a726.3).\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.",
+        "operationId": "get_findings_api_runs__run_id__findings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter: exact severity match.",
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter: exact severity match.",
+              "title": "Severity"
+            }
+          },
+          {
+            "description": "Filter: exact type match.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter: exact type match.",
+              "title": "Type"
+            }
+          },
+          {
+            "description": "Include findings a guard suppressed.",
+            "in": "query",
+            "name": "include_suppressed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include findings a guard suppressed.",
+              "title": "Include Suppressed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Findings (PRD \u00a726.1)",
+        "tags": [
+          "findings"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/graph": {
+      "get": {
+        "description": "Return nodes, edges and the critical path, computed live from the sealed event log.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n    TimingAnalysisError / OverheadAnalysisError: `409` \u2014 the log is not yet in a shape\n        this analysis can run over (PRD \u00a736 `E-ANLZ-*`; most commonly, the run has not\n        been sealed and still has an open span).\n\n`at_virtual_ts`, when given, restricts the *reported* nodes/edges to ones whose own\nactivity had started by that instant; the critical path and `cp_share`/`cp_ms` figures\nare still computed over the *full* sealed run and only filtered to the surviving node\nids \u2014 this is a simplification of PRD \u00a726.1's \"graph state as of that instant\", declared\nin `docs/api.md`, not a full historical re-derivation of what the critical path *would\nhave been* had the run stopped at that instant.",
+        "operationId": "get_graph_api_runs__run_id__graph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict to nodes that had started by this virtual ms (PRD \u00a726.1).",
+            "in": "query",
+            "name": "at_virtual_ts",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to nodes that had started by this virtual ms (PRD \u00a726.1).",
+              "title": "At Virtual Ts"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Node/edge graph (PRD \u00a726.1)",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/scorecard": {
+      "get": {
+        "description": "Return a run's persisted scorecard.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n    NotYetAvailableError: `409` `E-SCORE-001` \u2014 the run exists but no scorecard has been\n        computed and persisted for it yet. No prompt in this build runs the full\n        `baseline -> verdict` pipeline and calls `store.upsert_scorecard` (P17, not\n        started) \u2014 see `docs/api.md`. Reported plainly, not as an empty `200` (PRD \u00a736\n        rule 1) and not as `404` (the run itself is real; its scorecard is what's missing).",
+        "operationId": "get_scorecard_api_runs__run_id__scorecard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorecardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scorecard (PRD \u00a726.1)",
+        "tags": [
+          "scorecard"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/state": {
+      "get": {
+        "description": "Return every state key's last-known value hash as of `at_virtual_ts` (PRD \u00a720.4).\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.",
+        "operationId": "get_state_at_api_runs__run_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Reconstruct state as of this virtual ms.",
+            "in": "query",
+            "name": "at_virtual_ts",
+            "required": true,
+            "schema": {
+              "description": "Reconstruct state as of this virtual ms.",
+              "title": "At Virtual Ts",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconstructed state (PRD \u00a726.1, \u00a720.4)",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/waterfall": {
+      "get": {
+        "description": "Return per-agent lanes of spans with virtual start/end and critical-path flags.\n\nRaises:\n    RunNotFoundError: `E-RUN-404`.\n    TimingAnalysisError: `409` \u2014 see `get_graph`.\n\n`bucket` (PRD \u00a716.2.2's six-way overhead classification) is reported as `null` on every\nspan: `analysis.overhead` computes and aggregates bucket *totals*\n(`OverheadDecomposition.bucket_ms`) but exposes no public per-node classification to\nproject back onto an individual span \u2014 only its private `_classify_node` does, and this\nlayer does not reach into another module's private surface. This is a real, declared\ngap (`docs/api.md` \"What GET .../waterfall does not yet do\"), not a silent omission.",
+        "operationId": "get_waterfall_api_runs__run_id__waterfall_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Window start, virtual ms.",
+            "in": "query",
+            "name": "from_ms",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Window start, virtual ms.",
+              "title": "From Ms"
+            }
+          },
+          {
+            "description": "Window end, virtual ms.",
+            "in": "query",
+            "name": "to_ms",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Window end, virtual ms.",
+              "title": "To Ms"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaterfallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Span waterfall (PRD \u00a726.1)",
+        "tags": [
+          "analysis"
+        ]
+      }
+    },
+    "/api/scenarios": {
+      "get": {
+        "description": "Return every scenario the store has persisted, unioned with `scenarios_dir`'s files.\n\nA scenario id present in both sources is reported once, from the store \u2014 the store's\ncopy is the one a real run's `runs.scenario_hash` actually pins (PRD Sec27.2), so it is the\nmore authoritative of the two for an id that exists in both places.",
+        "operationId": "list_scenarios_api_scenarios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List scenarios (PRD Sec26.1)",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/scenarios/validate": {
+      "post": {
+        "description": "Validate scenario text or an existing scenario id and return the resolved document.\n\nNever raises for an invalid scenario (Design Constraint 1's \"thin\" still holds: this\ncalls `scenario.loader`/`scenario.validate` and serialises, no rule lives here) \u2014 a\nmalformed or invalid scenario is a `200` with `valid: false`, because that is what makes\nthis endpoint safe for the UI's chaos panel to call on every keystroke.\n\nRaises:\n    ScenarioNotFoundError: `scenario_id` was given and names nothing in either source.",
+        "operationId": "validate_scenario_api_scenarios_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioValidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dry-run validate a scenario (PRD Sec26.1)",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/scenarios/{scenario_id}": {
+      "get": {
+        "description": "Return one scenario's raw content plus its resolved (defaults-applied) form.\n\nRaises:\n    ScenarioNotFoundError: `E-SCEN-404` \u2014 neither source has this id.",
+        "operationId": "get_scenario_api_scenarios__scenario_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fetch a scenario (PRD Sec26.1)",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/version": {
+      "get": {
+        "description": "Return the AgentDX package version and the event `schema_version` it writes.",
+        "operationId": "get_version_api_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "AgentDX version and event schema version (PRD Sec35)",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

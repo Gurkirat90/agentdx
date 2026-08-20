@@ -2,14 +2,18 @@
 
 Every command in PRD §37.1 is registered here so that `agentdx --help` prints the
 real command list from day one and the surface cannot quietly drift from the spec.
-No command has an implementation yet — each exits 2 (usage/configuration error,
-PRD §37.2) with an explicit "not implemented" message naming the prompt that owns
-it. These are declared-empty commands, not stubs presented as working behaviour
-(AGENTS.md §2). The full command bodies, the authoritative exit-code table and the
-output conventions land at P17.
+Every command but `ui` has no implementation yet — each of those exits 2
+(usage/configuration error, PRD §37.2) with an explicit "not implemented" message
+naming the prompt that owns it. These are declared-empty commands, not stubs
+presented as working behaviour (AGENTS.md §2). `ui` is P14's own command (its
+docstring already named "Serve... the API on 127.0.0.1:8420" before this prompt);
+it now really serves `agentdx.api.app`'s FastAPI app — see that module and
+`ui()`'s own docstring for what it does and does not yet cover. The full command
+bodies for everything else, the authoritative exit-code table and the output
+conventions land at P17.
 """
 
-from typing import NoReturn
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -100,9 +104,36 @@ def doctor() -> None:
 
 
 @app.command()
-def ui() -> None:
-    """Serve the Control Tower and the API on 127.0.0.1:8420."""
-    _not_implemented("ui", "P14")
+def ui(
+    host: Annotated[
+        str | None,
+        typer.Option(
+            "--host",
+            help=(
+                "Bind address. Omit for 127.0.0.1 (loopback-only, PRD §26/§31.10's default "
+                "posture). Passing --host explicitly is what Design Constraint 3 requires to "
+                "bind anywhere else — doing so prints a no-auth warning, since this server "
+                "has none."
+            ),
+        ),
+    ] = None,
+    port: Annotated[
+        int | None, typer.Option("--port", help="Bind port. Omit for [api].port (default 8420).")
+    ] = None,
+) -> None:
+    """Serve the API on 127.0.0.1:8420.
+
+    P14 delivers the API layer only — no frontend was in this prompt's scope (see
+    `docs/api.md`), so "the Control Tower" half of this command's own docstring-inherited
+    promise is not yet built; this serves `agentdx.api.app`'s FastAPI app and nothing else.
+    """
+    from agentdx.api.app import serve
+
+    try:
+        serve(host=host, port=port, allow_non_local=host is not None)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=_EXIT_NOT_IMPLEMENTED) from exc
 
 
 @app.command()

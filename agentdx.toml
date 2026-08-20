@@ -107,3 +107,35 @@ strategy = "delay_bounded"
 # Q-43.2.4: sleep sets / full DPOR are adopted only if measured redundant exploration on the
 # fixtures exceeds this fraction — measured, not guessed (docs/exploration.md).
 upgrade_reduction_if_redundancy_over = 0.40
+
+[api]
+# PRD §26 / CONTEXT.md §3: local-only by default (network posture §31.10). `--host` on the
+# CLI is required to bind elsewhere and prints the no-auth warning — this is the fallback the
+# server binds to when nothing overrides it.
+host = "127.0.0.1"
+port = 8420
+
+# PRD §26.1 POST /api/runs: "concurrent-run limit (default 4) not exceeded".
+concurrent_run_limit = 4
+
+# PRD §26.1 GET /runs/{id}/events: "limit max 5 000; default 1 000".
+events_page_limit_default = 1000
+events_page_limit_max = 5000
+
+# PRD §26.1 GET /runs: "limit=50" in the example query.
+runs_page_limit_default = 50
+
+# PRD §26.2 WebSocket protocol tunables, verbatim.
+ws_backlog_batch_size = 1000            # "Sent in batches of 1 000 before any live event"
+ws_flow_control_max_unacked = 5000      # "Server pauses after 5 000 unacked events"
+ws_heartbeat_interval_s = 15.0          # "ping/pong every 15 s"
+ws_heartbeat_timeout_s = 45.0           # "server closes after 45 s of silence"
+ws_max_connections_per_run = 8          # close code 4013: "too many connections (limit 8 per run)"
+
+# Not a PRD §26.2 number (that section specifies the client-visible protocol, not how the
+# server notices a new stored row exists) — see `config.py::ApiConfig.ws_poll_interval_s`'s
+# own docstring. Declared here anyway, not left as a bare literal in `ws.py` (tripwire 5).
+ws_poll_interval_s = 0.1
+
+# PRD §26.1 GET /api/scenarios: filesystem directory scanned for *.yaml/*.yml scenario files.
+scenarios_dir = "scenarios"

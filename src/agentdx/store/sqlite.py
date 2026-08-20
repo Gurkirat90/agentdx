@@ -660,6 +660,55 @@ class Store:
         ).fetchone()
         return int(row[0])
 
+    def count_events_of_type(self, run_id: str, event_type: EventType) -> int:
+        """Return how many stored events of `event_type` a run has — an indexed `COUNT(*)`.
+
+        Added for `api/` (P14, D-58): `GET /api/runs/{id}`'s `counts.spans`/`counts.messages`/
+        `counts.llm_calls`/`determinism.nondeterminism_warnings` need real per-type counts and
+        nothing in this build populates `run_end`'s optional derived-totals fields yet (no
+        prompt wires the scheduler's summary up to them) — this is the same indexed-lookup
+        shape as `event_count`, filtered to one type instead of the whole log, and costs a
+        `COUNT(*)` over the `idx_events_type` index rather than deserialising every row.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM events WHERE run_id = ? AND type = ?",
+            (run_id, str(event_type)),
+        ).fetchone()
+        return int(row[0])
+
+    def sum_llm_tokens(self, run_id: str) -> int:
+        """Return the total `prompt_tokens + completion_tokens` over every `llm_call` event.
+
+        Added alongside `count_events_of_type` (P14, D-58) for `GET /api/runs/{id}`'s
+        `counts.tokens`. Uses SQLite's `json1` extension (`json_extract`) to sum straight out
+        of the stored `payload` column, still scoped by the `idx_events_type` index on `(run_id,
+        type)` — this reads only `llm_call` rows and only the two integer fields it needs from
+        each, rather than reconstructing a full `Event` (with its `vclock`/`causal_parents`)
+        for every one, the way a `read_events` scan would.
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(json_extract(payload, '$.prompt_tokens')), 0) + "
+            "COALESCE(SUM(json_extract(payload, '$.completion_tokens')), 0) "
+            "FROM events WHERE run_id = ? AND type = ?",
+            (run_id, str(EventType.LLM_CALL)),
+        ).fetchone()
+        return int(row[0])
+
+    def list_agent_ids(self, run_id: str) -> tuple[str, ...]:
+        """Return every distinct `agent_id` that has written an event for this run, sorted.
+
+        An indexed `SELECT DISTINCT` through `idx_events_agent(run_id, agent_id, seq)` (P14,
+        D-58) — `GET /api/runs/{id}`'s `graph.agents` needs the run's agent roster and `runs`
+        has no column for it (agents are derived from events, per PRD §6.3's own derivation
+        rule, never independently stored).
+        """
+        rows = self._conn.execute(
+            "SELECT DISTINCT agent_id FROM events WHERE run_id = ? AND agent_id IS NOT NULL "
+            "ORDER BY agent_id",
+            (run_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
     def last_seq(self, run_id: str) -> int | None:
         """Return the highest stored `seq` for a run, or None when the log is empty.
 

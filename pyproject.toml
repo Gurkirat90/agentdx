@@ -32,6 +32,12 @@ dependencies = [
   "uvicorn>=0.32,<1.0",
   "websockets>=13,<16",
   "pydantic>=2.9,<3.0",
+  # `python-multipart` — ADR-014. FastAPI's own multipart/form parser (Starlette calls into
+  # it for `UploadFile`); required by `POST /api/import`, which PRD §26.1 specifies as a
+  # multipart upload. Not one of ADR-004's enumerated distributions — flagged for owner
+  # ratification in P14's closing blocks, following AGENTS.md §2's "ADR before any new
+  # dependency" rule.
+  "python-multipart>=0.0.12,<1.0",
   # CLI — CONTEXT.md §3, PRD §37
   "typer>=0.15,<1.0",
   # Store — CONTEXT.md §3, PRD §27 (sqlite3 is stdlib)
@@ -128,6 +134,9 @@ allowed-confusables = ["×", "–"]
 "src/agentdx/cli/*" = ["T20"]
 "scripts/*" = ["T20", "S603", "S607"]  # CI gates print and shell out to git by design
 "tests/*" = ["D100", "D103", "S101"]  # asserts are the point of a test
+# Design Constraint 3 (P14) is specifically about refusing/warning on a 0.0.0.0 bind — this
+# file's whole point is exercising that literal, not binding a real socket to it.
+"tests/api/test_app_serve.py" = ["S104"]
 # `just fixtures-check` runs this file directly (`python -m tests.golden.fixtures_runner`);
 # it is a standalone CLI in the same sense as `scripts/*`, not code exercised inside a run.
 "tests/golden/fixtures_runner.py" = ["T20"]
@@ -150,6 +159,26 @@ disallow_any_explicit = true          # AGENTS.md §4: no escape hatch
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 mypy_path = "src"
 packages = ["agentdx"]
+# P14: needed once `api/models.py` started constructing Pydantic models by their Python field
+# name where an `alias` is set (e.g. `GraphEdge(from_=...)`, since `from` is a keyword) —
+# without this plugin mypy only knows the alias-shaped `__init__` and reports a spurious
+# `call-arg`. No new dependency: `pydantic` is already ADR-004-approved and ships this plugin.
+plugins = ["pydantic.mypy"]
+
+# P14: every `class Foo(pydantic.BaseModel): ...` — with no `Any` anywhere in the developer's
+# own annotations — trips `explicit-any` under `--strict --disallow-any-explicit`, confirmed
+# with a two-line repro (`class Foo(BaseModel): x: int` alone) against pydantic 2.13/mypy
+# 2.3: the `Any` is inside Pydantic's own public stubs (`model_config`/`model_fields` etc.),
+# not code this project wrote, and the pydantic mypy plugin does not change the result. This
+# is the first prompt to define a `pydantic.BaseModel` subclass in this codebase (ADR-004
+# locked `pydantic` at P01; nothing before P14 used `BaseModel`, only plain dataclasses in
+# `config.py`), so the clash between that ADR and AGENTS.md §4's mypy policy was latent until
+# now. Scoped to exactly the one module that defines model classes — `disallow_any_explicit`
+# still applies to every route/service module that merely *uses* them (confirmed: a function
+# returning a `BaseModel` subclass adds no further errors beyond the class definition itself).
+[[tool.mypy.overrides]]
+module = "agentdx.api.models"
+disallow_any_explicit = false
 
 # ----------------------------------------------------------------------------
 # pytest

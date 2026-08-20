@@ -288,6 +288,79 @@ class ExploreConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ApiConfig:
+    """The `[api]` table — the FastAPI server's tunables (P14, PRD §26).
+
+    Guarantees: `host`/`port`, the concurrent-run limit, and every WebSocket protocol
+    number (backlog batch size, flow-control high-water mark, heartbeat interval/timeout,
+    per-run connection limit) are the only place P14 holds them; `api/app.py` and
+    `api/ws.py` hold no literal of their own (AGENTS.md §4, tripwire 5). Declared here
+    following the D-12/D-20/D-38/D-43/D-50/D-54 precedent: `config.py` is not in P14's
+    `DELIVERABLES`, but every prior prompt that landed a new tunable surface extended this
+    module the same way, once its own consumer existed to read it.
+    """
+
+    host: str = "127.0.0.1"
+    """PRD §26/§31.10: local-only by default (I7-adjacent network posture). Binding
+    elsewhere requires the CLI's explicit `--host` flag, which prints the no-auth warning —
+    this default is what the server falls back to when nothing overrides it."""
+
+    port: int = 8420
+    """CONTEXT.md §3 locked value."""
+
+    concurrent_run_limit: int = 4
+    """PRD §26.1 `POST /api/runs`: "concurrent-run limit (default 4) not exceeded"."""
+
+    events_page_limit_default: int = 1_000
+    """PRD §26.1 `GET /runs/{id}/events`: default page size."""
+
+    events_page_limit_max: int = 5_000
+    """PRD §26.1 `GET /runs/{id}/events`: "limit max 5 000"."""
+
+    runs_page_limit_default: int = 50
+    """PRD §26.1 `GET /runs`: default page size ("limit=50" in the example query)."""
+
+    ws_backlog_batch_size: int = 1_000
+    """PRD §26.2: "Sent in batches of 1 000 before any live event"."""
+
+    ws_flow_control_max_unacked: int = 5_000
+    """PRD §26.2: "Server pauses after 5 000 unacked events; client `ack` resumes"."""
+
+    ws_heartbeat_interval_s: float = 15.0
+    """PRD §26.2: "ping/pong every 15 s"."""
+
+    ws_heartbeat_timeout_s: float = 45.0
+    """PRD §26.2: "server closes after 45 s of silence"."""
+
+    ws_max_connections_per_run: int = 8
+    """PRD §26.2 close code 4013: "too many connections (limit 8 per run)"."""
+
+    ws_poll_interval_s: float = 0.1
+    """How often `ws.py`'s live-tail loop re-reads the store for rows past what it has sent.
+
+    Not a PRD §26.2 number — the PRD specifies the *client-visible* protocol (backlog batch
+    size, flow control, heartbeat), not how the server notices a new row exists. This build
+    has no writer-to-API push channel (`store/` is a plain SQLite file, PRD §27.3's "one
+    writer, many readers"), so the sender polls; short enough that local WAL reads make live
+    tailing feel immediate, tunable if that assumption changes (AGENTS.md tripwire 5: the
+    number lives here, not as a literal in `ws.py`)."""
+
+    scenarios_dir: Path = Path("scenarios")
+    """PRD §26.1 `GET /api/scenarios`: the filesystem directory scanned for `*.yaml`/`*.yml`
+    scenario files, relative to the current working directory unless absolute. A scenario a
+    past run has referenced is also discoverable through the store regardless of this path
+    (`store.get_scenario`); this setting only governs the filesystem-listing half."""
+
+    def with_overrides(self, **kwargs: object) -> ApiConfig:
+        """Return a copy with the non-None keyword arguments applied.
+
+        Raises:
+            ConfigError: a keyword names a field this section does not have.
+        """
+        return _apply(self, "api", kwargs)
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulerConfig:
     """The `[scheduler]` table of PRD §8.7 — the cooperative scheduler's tunables (P06).
 
@@ -345,6 +418,7 @@ class AgentDXConfig:
     scheduler: SchedulerConfig = SchedulerConfig()
     cache: CacheConfig = CacheConfig()
     explore: ExploreConfig = ExploreConfig()
+    api: ApiConfig = ApiConfig()
 
     @classmethod
     def load(
@@ -359,6 +433,7 @@ class AgentDXConfig:
         scheduler: Mapping[str, object] | None = None,
         cache: Mapping[str, object] | None = None,
         explore: Mapping[str, object] | None = None,
+        api: Mapping[str, object] | None = None,
     ) -> AgentDXConfig:
         """Resolve configuration through the PRD §8.7 precedence chain.
 
@@ -379,6 +454,7 @@ class AgentDXConfig:
             scheduler: Per-call `[scheduler]` overrides.
             cache: Per-call `[cache]` overrides.
             explore: Per-call `[explore]` overrides.
+            api: Per-call `[api]` overrides.
 
         Returns:
             A fully resolved, immutable configuration.
@@ -403,6 +479,7 @@ class AgentDXConfig:
             explore=_coerce_explore(
                 _resolve(ExploreConfig(), "explore", path, environment, explore)
             ),
+            api=_coerce_api(_resolve(ApiConfig(), "api", path, environment, api)),
         )
 
 
@@ -419,6 +496,7 @@ _Section = TypeVar(
     SchedulerConfig,
     CacheConfig,
     ExploreConfig,
+    ApiConfig,
 )
 
 
@@ -726,6 +804,72 @@ def _coerce_explore(raw: ExploreConfig) -> ExploreConfig:
             "upgrade_reduction_if_redundancy_over",
             "explore",
         ),
+    )
+
+
+def _coerce_api(raw: ApiConfig) -> ApiConfig:
+    """Return `raw` with every `[api]` field coerced to its declared type and range-checked.
+
+    Guarantees: `port` is a valid TCP port; every WebSocket protocol number and the
+    concurrent-run limit are positive; `scenarios_dir` is an expanded `Path`.
+
+    Raises:
+        ConfigError: a value could not be coerced, or is outside its permitted range.
+    """
+    return ApiConfig(
+        host=_as_text(raw.host, "host", "api"),
+        port=_in_range(_as_int(raw.port, "port", "api"), "port", "api", minimum=1, maximum=65_535),
+        concurrent_run_limit=_positive_in(
+            _as_int(raw.concurrent_run_limit, "concurrent_run_limit", "api"),
+            "concurrent_run_limit",
+            "api",
+        ),
+        events_page_limit_default=_positive_in(
+            _as_int(raw.events_page_limit_default, "events_page_limit_default", "api"),
+            "events_page_limit_default",
+            "api",
+        ),
+        events_page_limit_max=_positive_in(
+            _as_int(raw.events_page_limit_max, "events_page_limit_max", "api"),
+            "events_page_limit_max",
+            "api",
+        ),
+        runs_page_limit_default=_positive_in(
+            _as_int(raw.runs_page_limit_default, "runs_page_limit_default", "api"),
+            "runs_page_limit_default",
+            "api",
+        ),
+        ws_backlog_batch_size=_positive_in(
+            _as_int(raw.ws_backlog_batch_size, "ws_backlog_batch_size", "api"),
+            "ws_backlog_batch_size",
+            "api",
+        ),
+        ws_flow_control_max_unacked=_positive_in(
+            _as_int(raw.ws_flow_control_max_unacked, "ws_flow_control_max_unacked", "api"),
+            "ws_flow_control_max_unacked",
+            "api",
+        ),
+        ws_heartbeat_interval_s=_positive_float(
+            _as_float(raw.ws_heartbeat_interval_s, "ws_heartbeat_interval_s", "api"),
+            "ws_heartbeat_interval_s",
+            "api",
+        ),
+        ws_heartbeat_timeout_s=_positive_float(
+            _as_float(raw.ws_heartbeat_timeout_s, "ws_heartbeat_timeout_s", "api"),
+            "ws_heartbeat_timeout_s",
+            "api",
+        ),
+        ws_max_connections_per_run=_positive_in(
+            _as_int(raw.ws_max_connections_per_run, "ws_max_connections_per_run", "api"),
+            "ws_max_connections_per_run",
+            "api",
+        ),
+        ws_poll_interval_s=_positive_float(
+            _as_float(raw.ws_poll_interval_s, "ws_poll_interval_s", "api"),
+            "ws_poll_interval_s",
+            "api",
+        ),
+        scenarios_dir=Path(str(raw.scenarios_dir)).expanduser(),
     )
 
 

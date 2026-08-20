@@ -1,0 +1,66 @@
+{
+  "benchmark": "api-latency",
+  "environment": {
+    "flat_log_events": 6001,
+    "implementation": "CPython",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "python": "3.12.3",
+    "repeats": 5,
+    "system": "Linux",
+    "waterfall_log_spans": 5000
+  },
+  "gate_status": "Informational, not a hard CI gate (\u00a726.3 is a performance expectation, not an NFR with its own pass/fail requirement elsewhere in the PRD). See each row's 'met_on_worst' for whether the slowest observed sample beat the stated target on this run's machine.",
+  "measurements": {
+    "get_events_1000": {
+      "best_ms": 53.815,
+      "met_on_worst": false,
+      "target_ms": 100.0,
+      "worst_ms": 140.41
+    },
+    "get_findings": {
+      "best_ms": 5.379,
+      "met_on_worst": true,
+      "target_ms": 50.0,
+      "worst_ms": 9.962
+    },
+    "get_run_detail": {
+      "best_ms": 10.575,
+      "met_on_worst": true,
+      "target_ms": 50.0,
+      "worst_ms": 40.746
+    },
+    "get_state": {
+      "best_ms": 171.894,
+      "met_on_worst": false,
+      "target_ms": 100.0,
+      "worst_ms": 182.106
+    },
+    "get_waterfall_5000_spans": {
+      "best_ms": 775.734,
+      "met_on_worst": false,
+      "target_ms": 150.0,
+      "worst_ms": 901.599
+    },
+    "post_runs": {
+      "best_ms": 4.702,
+      "met_on_worst": true,
+      "target_ms": 200.0,
+      "worst_ms": 6.52
+    },
+    "ws_backlog_5000_events": {
+      "best_ms": 369.365,
+      "met_on_worst": true,
+      "target_ms": 1000.0,
+      "worst_ms": 499.553
+    }
+  },
+  "method": "Each row is run `repeats` times against a real `fastapi.testclient.TestClient` (real routing, dependency injection, Pydantic response validation) over a real SQLite-backed Store; the SLOWEST sample is reported. This is a coarser statistic than the PRD's own 'p95' column \u2014 see 'not_measured'.",
+  "not_measured": [
+    "p95 under concurrent load \u2014 every row is `repeats` sequential single-connection TestClient calls on one process, not a load-test percentile.",
+    "post_runs measures this build's 503-refusal path (no RunLauncher wired into the default `agentdx ui` \u2014 see docs/api.md). \u00a726.3's load assumption for this row, 'returns before execution', does not apply: there is no execution path in this build to return before.",
+    "No committed fixture reaches the PRD's stated 5 000-event/span load assumption \u2014 flat_log and waterfall_log are synthetic logs generated at that scale by this harness, the same choice store-write-throughput.json made for NFR-10."
+  ],
+  "requirement": "PRD \u00a726.3",
+  "requirement_text": "Endpoint p95 latency targets under the stated load assumptions"
+}
