@@ -17,6 +17,19 @@ the one most shaped by two gaps this build carries into P14 (CONTEXT.md §7):
    docstrings), not fabricated placeholders and not the full timing DAG (`get_graph`/
    `get_waterfall` already pay that cost where the PRD's own example payload needs it; this
    route does not need the DAG for anything it reports).
+
+**A third, narrower gap, closed only in part (post-P14 repair):** `inject_fault`'s I12
+authorization check (`_check_chaos_authorization`) originally defaulted to treating an
+unresolvable scenario as fixture-safe — a fail-open bug, since a scenario that cannot be
+re-parsed could just as easily have been a user-graph target. This is now refused
+(`ScenarioUnresolvableForChaosError`, `409 E-CHAOS-004`) whenever `scenario_id` is set but
+the scenario row is missing or won't parse. **Deliberately not closed by this repair:** a
+run whose `RunRecord.scenario_id` is `None` outright (never populated) still skips the I12
+check entirely, same as before. `POST /api/runs` always sets `scenario_id`, so this is not
+reachable through the shipped API today — but it is a real, narrower version of the same
+gap, left open because closing it would mean deciding what a scenario-less run's fault
+authorization default *should* be (refuse always? require an explicit override?), which is
+a product decision, not a repair — see the repair's own audit trail for the reasoning.
 """
 
 from __future__ import annotations
@@ -41,6 +54,7 @@ from agentdx.api.errors import (
     RunNotFoundError,
     RunNotRunningError,
     ScenarioNotFoundError,
+    ScenarioUnresolvableForChaosError,
     TooManyConcurrentRunsError,
     UnknownFaultTypeError,
 )
@@ -532,6 +546,12 @@ def inject_fault(
             (declared gap — this build has no cheap way to enumerate them without a graph
             resolution `api/` cannot perform, see this module's docstring).
         ChaosAuthorizationError: `403 E-CHAOS-001` — I12/§13.3.
+        ScenarioUnresolvableForChaosError: `409 E-CHAOS-004` — the run's scenario is set
+            (`scenario_id` non-null) but its row is missing from the store or its stored
+            text no longer parses, so I12 authorization cannot be verified. Refused rather
+            than treated as fixture-safe by default — see this module's top docstring ("A
+            third, narrower gap") for the fail-open bug this replaces and the one related
+            gap left open on purpose.
         FaultControlUnavailableError: `503` — no `FaultController` configured.
     """
     record = store.get_run(run_id)
@@ -560,16 +580,20 @@ def inject_fault(
         raise FaultTargetNotFoundError(body.target, run_id)
 
     if record.scenario_id is not None:
+        # A scenario_id is set, so I12 authorization must actually be verified, not skipped
+        # — a missing row or an unparseable one is refused (E-CHAOS-004), never silently
+        # treated as "no scenario, nothing to check" (that was the fail-open bug this
+        # replaces; see the module's top docstring). `scenario_id is None` outright — never
+        # populated at all — is a separate, narrower, still-open gap; see the same note.
         scenario = store.get_scenario(record.scenario_id)
-        if scenario is not None:
-            try:
-                parsed = loader.parse_scenario_text(
-                    scenario.content, source_name=record.scenario_id
-                )
-                resolved = loader.resolve_defaults(parsed.data or {})
-            except loader.ScenarioLoadError:
-                resolved = {}
-            _check_chaos_authorization(resolved, body.target)
+        if scenario is None:
+            raise ScenarioUnresolvableForChaosError(run_id, record.scenario_id)
+        try:
+            parsed = loader.parse_scenario_text(scenario.content, source_name=record.scenario_id)
+            resolved = loader.resolve_defaults(parsed.data or {})
+        except loader.ScenarioLoadError as exc:
+            raise ScenarioUnresolvableForChaosError(run_id, record.scenario_id) from exc
+        _check_chaos_authorization(resolved, body.target)
 
     if state.fault_controller is None:
         raise FaultControlUnavailableError()

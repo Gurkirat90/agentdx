@@ -1,0 +1,87 @@
+{
+  "fixture": "code_pipeline",
+  "graph": {
+    "critical_path": [
+      "planner",
+      "coder",
+      "tester"
+    ],
+    "edges": [
+      {
+        "cp_handoff_ms": 1,
+        "cp_share": 0.02127659574468085,
+        "from": "coder",
+        "messages": 1,
+        "on_critical_path": true,
+        "to": "tester",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 1,
+        "cp_share": 0.02127659574468085,
+        "from": "planner",
+        "messages": 1,
+        "on_critical_path": true,
+        "to": "coder",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "planner",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "reviewer",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "reviewer",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "tester",
+        "total_handoff_ms": 1
+      }
+    ],
+    "nodes": [
+      {
+        "busy_ms": 8,
+        "cp_ms": 8,
+        "id": "coder",
+        "idle_ms": 6,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 2,
+        "cp_ms": 2,
+        "id": "planner",
+        "idle_ms": 0,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 7,
+        "cp_ms": 0,
+        "id": "reviewer",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 9,
+        "cp_ms": 9,
+        "id": "tester",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      }
+    ]
+  },
+  "run_id": "r_90089"
+}

@@ -1,0 +1,67 @@
+{
+  "content": "scenario: reviewer_crash_midflight\n# PRD \u00a721.2's [SOURCE] task path (`fixtures/tasks/refactor_module.md`) is under `fixtures/tasks/`,\n# a directory shared by multiple fixtures, not itself a fixture \u2014 target.fixture cannot be\n# inferred from it (C-13, CONTEXT.md \u00a710; fixed 2026-08-16 after an OP-2 audit found the\n# previously-shipped `fixtures/code_pipeline/refactor_module.md` path here pointed at a file\n# that does not exist on disk). target is set explicitly instead, naming the fixture this task\n# and the `reviewer` agent it targets actually live in.\ntask: fixtures/tasks/refactor_module.md\ntarget: {fixture: code_pipeline}\nseed: 42\nhypothesis:\n  task_success: \">= 0.9\"\n  p95_virtual_duration_ms: \"<= 45000\"\nfaults:\n  - type: agent_crash\n    agent: reviewer\n    at_virtual_ts: 2400\nguards:\n  max_virtual_duration_ms: 120000\n  max_tokens: 200000\nassertions:\n  - no_state_conflicts\n  - speedup_vs_baseline: \">= 1.0\"\n",
+  "content_hash": null,
+  "path": "/home/claude/agentdx/scenarios/reviewer_crash_midflight.yaml",
+  "resolved": {
+    "assertions": [
+      "no_state_conflicts",
+      {
+        "speedup_vs_baseline": ">= 1.0"
+      }
+    ],
+    "baseline": {
+      "allow_low_comparability": false,
+      "generate": true,
+      "prompt": null
+    },
+    "blast_radius": {
+      "agents": [],
+      "edges": [],
+      "providers": [],
+      "state_keys": [],
+      "tools": []
+    },
+    "chaos_opt_in": false,
+    "exploration": {
+      "enabled": false,
+      "k": 2,
+      "max_schedules": 200
+    },
+    "faults": [
+      {
+        "agent": "reviewer",
+        "allow_total_failure": false,
+        "at_virtual_ts": 2400,
+        "recoverable": true,
+        "type": "agent_crash"
+      }
+    ],
+    "guards": {
+      "max_events": 500000,
+      "max_llm_calls": 500,
+      "max_retries": 20,
+      "max_tokens": 200000,
+      "max_virtual_duration_ms": 120000,
+      "max_wall_duration_s": 300
+    },
+    "hypothesis": {
+      "p95_virtual_duration_ms": "<= 45000",
+      "task_success": ">= 0.9"
+    },
+    "mode": "replay",
+    "repeats": 1,
+    "scenario": "reviewer_crash_midflight",
+    "seed": 42,
+    "success_check": {
+      "ref": null,
+      "type": "none"
+    },
+    "target": {
+      "fixture": "code_pipeline"
+    },
+    "task": "fixtures/tasks/refactor_module.md",
+    "version": 1
+  },
+  "scenario_id": "reviewer_crash_midflight",
+  "source": "file"
+}

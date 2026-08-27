@@ -1,0 +1,86 @@
+{
+  "fixture": "support_triage",
+  "graph": {
+    "critical_path": [
+      "classifier",
+      "responder"
+    ],
+    "edges": [
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "classifier",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "retriever_a",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "classifier",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "retriever_b",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "retriever_a",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "responder",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "retriever_b",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "responder",
+        "total_handoff_ms": 1
+      }
+    ],
+    "nodes": [
+      {
+        "busy_ms": 3,
+        "cp_ms": 3,
+        "id": "classifier",
+        "idle_ms": 0,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 10,
+        "cp_ms": 10,
+        "id": "responder",
+        "idle_ms": 0,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 6,
+        "cp_ms": 0,
+        "id": "retriever_a",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 6,
+        "cp_ms": 0,
+        "id": "retriever_b",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      }
+    ]
+  },
+  "run_id": "r_08ea8"
+}

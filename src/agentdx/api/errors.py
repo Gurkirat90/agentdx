@@ -174,6 +174,33 @@ class ChaosAuthorizationError(ApiError):
         )
 
 
+class ScenarioUnresolvableForChaosError(ApiError):
+    """`409 E-CHAOS-004` — a run's scenario is set but cannot be resolved right now.
+
+    I12 (CONTEXT.md §2) requires a user-graph fault to be explicitly authorized via
+    `chaos_opt_in`/`blast_radius`; that check (`_check_chaos_authorization`) can only run
+    once the run's scenario has been re-parsed into `resolved`. If the scenario row this run
+    is pinned to (`RunRecord.scenario_id`) has gone missing from the store, or the stored
+    text no longer parses, this build has no way to tell a fixture target from a user-graph
+    one — and PRD §36 rule 1 ("never fail silently") plus I12 itself both require that
+    ambiguity to refuse the fault, not silently skip authorization and arm it anyway. Raised
+    only when `scenario_id` is set but unresolvable — a run with no `scenario_id` at all
+    (never populated) is unaffected by this error; see this error's call site for why.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+
+    def __init__(self, run_id: str, scenario_id: str) -> None:
+        """Build the error naming the run and the scenario id that could not be resolved."""
+        super().__init__(
+            "E-CHAOS-004",
+            f"Run {run_id}'s scenario {scenario_id!r} could not be resolved — fault "
+            f"injection is refused because chaos-safety authorization (I12) cannot be "
+            f"verified without it",
+            detail={"run_id": run_id, "scenario_id": scenario_id},
+        )
+
+
 class UnknownFaultTypeError(ApiError):
     """`400` — PRD §26.1 `POST /api/runs/{id}/faults`: "unknown fault type"."""
 

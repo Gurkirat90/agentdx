@@ -1,0 +1,141 @@
+{
+  "fixture": "research_fanout",
+  "graph": {
+    "critical_path": [
+      "supervisor",
+      "worker_1",
+      "synthesiser"
+    ],
+    "edges": [
+      {
+        "cp_handoff_ms": 1,
+        "cp_share": 0.015873015873015872,
+        "from": "supervisor",
+        "messages": 1,
+        "on_critical_path": true,
+        "to": "worker_1",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "supervisor",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "worker_2",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "supervisor",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "worker_3",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "supervisor",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "worker_4",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 1,
+        "cp_share": 0.015873015873015872,
+        "from": "worker_1",
+        "messages": 1,
+        "on_critical_path": true,
+        "to": "synthesiser",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "worker_2",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "synthesiser",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "worker_3",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "synthesiser",
+        "total_handoff_ms": 1
+      },
+      {
+        "cp_handoff_ms": 0,
+        "cp_share": 0.0,
+        "from": "worker_4",
+        "messages": 1,
+        "on_critical_path": false,
+        "to": "synthesiser",
+        "total_handoff_ms": 1
+      }
+    ],
+    "nodes": [
+      {
+        "busy_ms": 3,
+        "cp_ms": 3,
+        "id": "supervisor",
+        "idle_ms": 0,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 11,
+        "cp_ms": 11,
+        "id": "synthesiser",
+        "idle_ms": 0,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 6,
+        "cp_ms": 6,
+        "id": "worker_1",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 6,
+        "cp_ms": 0,
+        "id": "worker_2",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 6,
+        "cp_ms": 0,
+        "id": "worker_3",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      },
+      {
+        "busy_ms": 6,
+        "cp_ms": 0,
+        "id": "worker_4",
+        "idle_ms": 4,
+        "role": null,
+        "status": "ok",
+        "tokens": 0
+      }
+    ]
+  },
+  "run_id": "r_52adb"
+}

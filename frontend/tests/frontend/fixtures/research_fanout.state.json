@@ -1,0 +1,34 @@
+{
+  "fixture": "research_fanout",
+  "run_id": "r_52adb",
+  "state": {
+    "at_seq": 25,
+    "at_virtual_ts": 31,
+    "keys": [
+      {
+        "key": "findings",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:aaeeae1363ab4c49f1e7fd7d7b55e5c3e3371c84e5580ff1be531539d6879aec",
+        "writer": "worker_2",
+        "written_at_seq": 25
+      },
+      {
+        "key": "question",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:fcd34bd60f8120a9cd05f8b8d86fa387d2cbc0d392f9d1a576bec7c1a9d6f34d",
+        "writer": "supervisor",
+        "written_at_seq": 2
+      },
+      {
+        "key": "subtopics",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:44b80295bca16fb316cbc9d522a5ed2c2480ef84913de45a2cc528a6b9b84036",
+        "writer": "supervisor",
+        "written_at_seq": 3
+      }
+    ]
+  }
+}

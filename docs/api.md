@@ -80,6 +80,7 @@ bug report." — no stack trace crosses the wire (PRD §36 rule 4, "reserved lan
 | `e-fault-001` | 400 | `POST /runs/{id}/faults` | Fault target not found (agent targets only — see declared gap below). |
 | `e-fault-002` | 400 | `POST /runs/{id}/faults` | Unknown or unshipped (non-P0) fault type. |
 | `e-chaos-001` | 403 | `POST /runs/{id}/faults` | I12/§13.3: chaos opt-in missing, blast radius empty, or target outside the declared blast radius. |
+| `e-chaos-004` | 409 | `POST /runs/{id}/faults` | The run's scenario is set (`scenario_id` non-null) but unresolvable — its store row is missing, or its stored text no longer parses — so I12 authorization cannot be verified. Refused rather than treated as fixture-safe by default. Post-P14 repair: the original build silently skipped the I12 check in this case instead of refusing (fail-open); a run whose `scenario_id` was never set at all is a narrower, still-open version of the same gap, unreachable via `POST /runs` today. |
 | `e-chaos-503` | 503 | `POST /runs/{id}/faults` | No `FaultController` configured on this server. |
 | `e-cmp-001` | 400 | `POST /runs/compare` | The two runs' scenario hashes differ and `force` was not set. |
 | `e-expl-001` | 409 | `GET /runs/{id}/exploration` | No exploration report exists to serve (declared gap, see below). |

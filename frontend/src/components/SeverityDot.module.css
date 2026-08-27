@@ -1,0 +1,43 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.mark {
+  flex: none;
+  /* WCAG 1.4.11 non-text contrast (3:1) for the marker's boundary, independent of fill hue:
+   * `--crit` (PRD §29.1's exact `#A8443A`) only measures 2.50:1 against `--navy-900`, below
+   * the floor on its own. A `--cream` outline measures 11.79:1 against `--navy-900` for every
+   * tone, so the dot/triangle's shape stays perceivable even where a fill colour alone
+   * wouldn't clear it — verified in tests/frontend/unit/tokenContrast.test.ts. */
+  stroke: var(--cream);
+  stroke-width: 0.75px;
+}
+
+.label {
+  font-size: 0.85em;
+  color: var(--sage);
+  text-transform: capitalize;
+}
+
+.critical {
+  fill: var(--crit);
+}
+
+.high {
+  fill: var(--crit);
+  opacity: 0.7;
+}
+
+.medium {
+  fill: var(--warn);
+}
+
+.low {
+  fill: var(--sage);
+}
+
+.info {
+  fill: var(--sage-dim);
+}

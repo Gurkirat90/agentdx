@@ -1,0 +1,34 @@
+{
+  "findings": {
+    "findings": [
+      {
+        "description": "coder wrote draft.module_a at seq 13; reviewer wrote draft.module_a at seq 28. Neither access happens-before the other; values diverge; no reducer or shared lock covers this key. The write at seq 28 survived; the write at seq 13 was silently discarded. One agent's work silently discarded.",
+        "evidence": {
+          "agent_a": "coder",
+          "agent_b": "reviewer",
+          "computation": "analysis.race.find_conflicts: write_write on key 'draft.module_a' between 'coder' (seq 13) and 'reviewer' (seq 28)",
+          "event_seqs": [
+            13,
+            28
+          ],
+          "fault_id": null,
+          "key": "draft.module_a",
+          "span_ids": [
+            "1539b0159eb5",
+            "5f55856dac38"
+          ]
+        },
+        "id": "f_draft_module_a_13_28",
+        "recommendation": "Declare a reducer on the `draft.module_a` channel, take `agentdx.lock(\"draft.module_a\")` around both writers, or route both writers through a single owning agent.",
+        "repro_scenario": null,
+        "severity": "critical",
+        "subtype": "write_write",
+        "suppressed_by": null,
+        "title": "Lost update on draft.module_a between coder and reviewer",
+        "type": "state_conflict"
+      }
+    ]
+  },
+  "fixture": "code_pipeline",
+  "run_id": "r_90089"
+}

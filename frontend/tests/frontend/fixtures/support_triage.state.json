@@ -1,0 +1,34 @@
+{
+  "fixture": "support_triage",
+  "run_id": "r_08ea8",
+  "state": {
+    "at_seq": 14,
+    "at_virtual_ts": 20,
+    "keys": [
+      {
+        "key": "category",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:15fc54ced3e27de1dfd135e500760f6266f3ad8d20a47a17071a00d4cad3bf41",
+        "writer": "classifier",
+        "written_at_seq": 3
+      },
+      {
+        "key": "context.docs_a",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:5784c5cbefc500356a5fa70dc7b9ffb76dc9a534fa898e5734ddcd8cefb82f26",
+        "writer": "retriever_a",
+        "written_at_seq": 14
+      },
+      {
+        "key": "ticket",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:574db69652491868fab0fb8ee69b48077bb4015543f3653bb3903c6c1642faac",
+        "writer": "classifier",
+        "written_at_seq": 2
+      }
+    ]
+  }
+}

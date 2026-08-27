@@ -1,0 +1,248 @@
+/*
+ * Chaos control panel styles (PRD §28.3, §13.3-13.6, Design Constraint 2). Same conventions as
+ * the other P16 panels: `tokens.css` custom properties only (AGENTS.md §4), `--focus-ring` on
+ * every interactive element.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cream);
+  margin: 0;
+}
+
+.status {
+  color: var(--sage);
+  margin: 0;
+}
+
+.lastFired {
+  margin: 0;
+  font-size: 0.8em;
+  color: var(--sage);
+  padding: var(--space-1) var(--space-2);
+  background: var(--elevation-well);
+  border-radius: var(--radius-sm);
+}
+
+.faultList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.faultRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--elevation-raised);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.faultInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.faultType {
+  color: var(--cream);
+  font-size: 0.88em;
+  font-weight: 600;
+}
+
+.faultTarget {
+  color: var(--sage);
+  font-size: 0.78em;
+}
+
+.armButton {
+  background: var(--elevation-well);
+  border: 1.5px solid var(--fault);
+  color: var(--fault);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.armButton:disabled {
+  border-color: var(--elevation-border);
+  color: var(--sage);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.armButton:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Confirm step (arm -> confirm -> fire, Design Constraint 2): a distinct, unmissable frame so
+ * this never reads as "just another panel section" — a --fault-bordered well, matching the
+ * fault-active token used everywhere else this build marks something armed/live. */
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--elevation-well);
+  border: 2px solid var(--fault);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.armedLabel {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--fault);
+}
+
+.faultDetail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.faultDetail dt {
+  color: var(--sage);
+  font-size: 0.78em;
+}
+
+.faultDetail dd {
+  margin: 0;
+  color: var(--cream);
+  font-size: 0.82em;
+}
+
+.blastRadius {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-sm);
+}
+
+.blastRadiusTitle {
+  margin: 0 0 var(--space-1) 0;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sage);
+}
+
+.blastRadiusFixtureNote {
+  margin: 0;
+  font-size: 0.8em;
+  color: var(--sage);
+  font-style: italic;
+}
+
+.blastRadiusRow {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 0.78em;
+}
+
+.blastRadiusLabel {
+  color: var(--sage);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.blastRadiusEmpty {
+  color: var(--sage);
+  font-style: italic;
+}
+
+.blastRadiusItems {
+  color: var(--cream);
+}
+
+.fireError {
+  margin: 0;
+  color: var(--cream);
+  background: var(--crit);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.82em;
+}
+
+.confirmActions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.disarmButton {
+  background: var(--elevation-raised);
+  border: 1px solid var(--elevation-border);
+  color: var(--sage);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.disarmButton:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* The one genuinely destructive action in this panel (Design Constraint 2: never one-click —
+ * this button only exists at all after Arm + a full blast-radius render, never before). Solid
+ * --fault fill with --navy text (not --fault text on navy) for the same D-58 accessible-
+ * compositing reasoning as the graph's fault ring: a filled control, not bare coloured text. */
+.fireButton {
+  background: var(--fault);
+  border: 1.5px solid var(--fault);
+  color: var(--navy-950);
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-4);
+  cursor: pointer;
+}
+
+.fireButton:disabled {
+  background: var(--elevation-border);
+  border-color: var(--elevation-border);
+  color: var(--sage);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fireButton:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

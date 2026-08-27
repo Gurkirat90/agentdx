@@ -9,7 +9,80 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from agentdx.config import AgentDXConfig
+from agentdx.store.sqlite import RunRecord, ScenarioRecord, Store
 from tests.api.conftest import AGENTS, FakeFaultController, FakeRunLauncher, make_sealed_run
+from tests.unit.store.conftest import chain
+from tests.unit.store.factories import build_log, run_record_for
+
+_GRAPH_SCENARIO_TEMPLATE = """\
+version: 1
+scenario: user_graph_fault_test
+description: a user-graph scenario for API chaos-authorization tests (I12).
+
+target:
+  graph: "my_app.graphs:build_graph"
+
+task: fixtures/tasks/refactor_module.md
+seed: 42
+{extra}
+hypothesis:
+  task_success: ">= 0.9"
+
+faults:
+  - type: agent_crash
+    agent: planner
+    at_virtual_ts: 3000
+    recoverable: false
+
+guards:
+  max_virtual_duration_ms: 120000
+  max_tokens: 200000
+  max_retries: 20
+
+success_check:
+  type: python
+  ref: "fixtures.code_pipeline.checks:task_success"
+
+assertions:
+  - no_silent_failures
+"""
+
+
+def _seed_running_run(
+    db_path: Path,
+    api_config: AgentDXConfig,
+    *,
+    run_id: str,
+    scenario_id: str | None,
+    scenario_text: str | None = None,
+) -> str:
+    """Create a `status="running"` run pinned to `scenario_id`, for I12 authorization tests.
+
+    Bypasses `POST /api/runs` deliberately: these tests need direct control over
+    `RunRecord.scenario_id`, including "set but no matching scenario row exists" and "set,
+    but the stored text doesn't parse" — states `create_run` never produces on its own,
+    since it always pins a scenario it just validated. `scenario_text=None` with a non-null
+    `scenario_id` models the first of those; a malformed `scenario_text` models the second.
+    """
+    store = Store.open(db_path, config=api_config.store)
+    try:
+        if scenario_text is not None and scenario_id is not None:
+            store.upsert_scenario(
+                ScenarioRecord(
+                    scenario_id=scenario_id,
+                    content=scenario_text,
+                    content_hash="blake2b:test",
+                    version=1,
+                    path=None,
+                )
+            )
+        events = build_log(spans=2, run_id=run_id, sealed=False)
+        record = RunRecord(**run_record_for(events, status="running"), scenario_id=scenario_id)  # type: ignore[arg-type]
+        store.create_run(record)
+        store.append(chain(events))
+    finally:
+        store.close()
+    return run_id
 
 _VALID_SCENARIO = """\
 version: 1
@@ -327,6 +400,128 @@ def test_inject_fault_404_for_unknown_run(client: TestClient) -> None:
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "E-RUN-404"
+
+
+# POST /api/runs/{id}/faults — I12 chaos authorization (CONTEXT.md §2), user-graph targets
+#
+# `test_inject_fault_with_controller_succeeds_against_fixture_target` above never exercises
+# `_check_chaos_authorization`'s substantive branches at all — a fixture target is chaos-safe
+# by construction and returns before any of them run. These tests are what was missing: the
+# actual I12 matrix, plus the post-repair regression coverage for the fail-open bug the
+# original build shipped (an unresolvable scenario silently skipped authorization instead of
+# refusing the fault).
+
+
+def test_inject_fault_graph_target_without_opt_in_403(
+    db_path: Path, api_config: AgentDXConfig, client: TestClient
+) -> None:
+    """A user-graph target with no `chaos_opt_in` is refused, never armed (I12)."""
+    scenario_text = _GRAPH_SCENARIO_TEMPLATE.format(extra="")
+    run_id = _seed_running_run(
+        db_path, api_config, run_id="r_i12_01", scenario_id="s_01", scenario_text=scenario_text
+    )
+    response = client.post(
+        f"/api/runs/{run_id}/faults", json={"type": "agent_crash", "target": "planner"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "E-CHAOS-001"
+
+
+def test_inject_fault_graph_target_empty_blast_radius_403(
+    db_path: Path, api_config: AgentDXConfig, client: TestClient
+) -> None:
+    """Opting in with no declared `blast_radius` is still refused (§13.4)."""
+    scenario_text = _GRAPH_SCENARIO_TEMPLATE.format(extra="chaos_opt_in: true\nblast_radius: {}\n")
+    run_id = _seed_running_run(
+        db_path, api_config, run_id="r_i12_02", scenario_id="s_02", scenario_text=scenario_text
+    )
+    response = client.post(
+        f"/api/runs/{run_id}/faults", json={"type": "agent_crash", "target": "planner"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "E-CHAOS-001"
+
+
+def test_inject_fault_graph_target_outside_blast_radius_403(
+    db_path: Path, api_config: AgentDXConfig, client: TestClient
+) -> None:
+    """A target not named in the declared `blast_radius` is refused."""
+    scenario_text = _GRAPH_SCENARIO_TEMPLATE.format(
+        extra="chaos_opt_in: true\nblast_radius:\n  agents: [coder]\n"
+    )
+    run_id = _seed_running_run(
+        db_path, api_config, run_id="r_i12_03", scenario_id="s_03", scenario_text=scenario_text
+    )
+    response = client.post(
+        f"/api/runs/{run_id}/faults", json={"type": "agent_crash", "target": "planner"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "E-CHAOS-001"
+
+
+def test_inject_fault_graph_target_inside_blast_radius_202(
+    db_path: Path,
+    api_config: AgentDXConfig,
+    client_with_launcher: tuple[TestClient, FakeRunLauncher, FakeFaultController],
+) -> None:
+    """A properly authorized user-graph fault — opted in, target inside the radius — arms."""
+    client, _launcher, controller = client_with_launcher
+    scenario_text = _GRAPH_SCENARIO_TEMPLATE.format(
+        extra="chaos_opt_in: true\nblast_radius:\n  agents: [planner]\n"
+    )
+    run_id = _seed_running_run(
+        db_path, api_config, run_id="r_i12_04", scenario_id="s_04", scenario_text=scenario_text
+    )
+    response = client.post(
+        f"/api/runs/{run_id}/faults", json={"type": "agent_crash", "target": "planner"}
+    )
+    assert response.status_code == 202
+    assert response.json()["fault_id"] == controller.fault_id
+    assert controller.calls and controller.calls[-1]["run_id"] == run_id
+
+
+def test_inject_fault_scenario_row_missing_refuses_409(
+    db_path: Path, api_config: AgentDXConfig, client: TestClient
+) -> None:
+    """`scenario_id` is set but no matching store row exists — refused, not treated as safe.
+
+    Regression test for the I12 fail-open bug: the original code defaulted an unresolvable
+    scenario to `resolved = {}`, which `_is_graph_target` reads as "not a graph target" and
+    therefore skips authorization — silently arming the fault instead of refusing it. This
+    run's `scenario_id` points at a row that was never written, so a fixture-safe run and an
+    unauthorized user-graph run are indistinguishable from what the API can see; refusing is
+    the only honest answer (PRD §36 rule 1).
+    """
+    run_id = _seed_running_run(
+        db_path, api_config, run_id="r_i12_05", scenario_id="s_missing", scenario_text=None
+    )
+    response = client.post(
+        f"/api/runs/{run_id}/faults", json={"type": "agent_crash", "target": "planner"}
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "E-CHAOS-004"
+
+
+def test_inject_fault_scenario_unparseable_refuses_409(
+    db_path: Path, api_config: AgentDXConfig, client: TestClient
+) -> None:
+    """`scenario_id` is set and the row exists, but its content no longer parses — refused.
+
+    Same fail-open bug as above, the other trigger: `loader.ScenarioLoadError` used to be
+    caught and papered over with `resolved = {}` rather than propagated as a refusal.
+    """
+    run_id = _seed_running_run(
+        db_path,
+        api_config,
+        run_id="r_i12_06",
+        scenario_id="s_corrupt",
+        scenario_text="not: [valid, yaml, {{{",
+    )
+    response = client.post(
+        f"/api/runs/{run_id}/faults", json={"type": "agent_crash", "target": "planner"}
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "E-CHAOS-004"
 
 
 # POST /api/runs/compare

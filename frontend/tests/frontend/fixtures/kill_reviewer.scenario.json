@@ -1,0 +1,72 @@
+{
+  "content": "# scenarios/kill_reviewer.yaml \u2014 gate G4 (CONTEXT.md \u00a76): \"Killing `reviewer` at t=3000\n# reproduces the same failure class and cascade shape, 20/20.\"\n#\n# `agentdx scenario run scenarios/kill_reviewer.yaml --repeat 20` is the gate's verification\n# command; `--repeat` is a CLI-level rerun count (P17, out of scope here), not this file's\n# `repeats:` field, which governs executions *per phase* within a single scheduler run\n# (PRD \u00a721.1). This scenario only needs to be valid and to declare the fault G4 exercises \u2014\n# reproducing 20/20 identical outcomes is what invariant I1 (determinism, gate G3) already\n# guarantees for any fixed scenario + seed, and is what the gate's own harness checks for.\nversion: 1\nscenario: kill_reviewer\ndescription: >-\n  reviewer is crashed mid-flight, non-recoverable, at t=3000ms. Exercises the supervisor's\n  timeout/retry path and the cascade into tester (PRD \u00a712.2 process-class agent_crash:\n  \"Supervisor timeout/retry path exercised; retry bucket grows; possible cascade\").\n\ntarget:\n  fixture: code_pipeline\n\ntask: fixtures/tasks/refactor_module.md\nseed: 42\n\nhypothesis:\n  task_success: \">= 0.9\"\n  p95_virtual_duration_ms: \"<= 45000\"\n\nfaults:\n  - type: agent_crash\n    agent: reviewer\n    at_virtual_ts: 3000\n    recoverable: false\n\nguards:\n  max_virtual_duration_ms: 120000\n  max_tokens: 200000\n  max_retries: 20\n\nsuccess_check:\n  type: python\n  ref: \"fixtures.code_pipeline.checks:task_success\"\n\nassertions:\n  - no_silent_failures\n  - deterministic_replay\n  # count: 1, not 0 \u2014 code_pipeline's own seeded G1 defect (a critical lost_update on\n  # draft.module_a, fixtures/code_pipeline/golden_findings.json) is present independently of\n  # this scenario's fault, so a count of 0 here would be guaranteed to fail once real\n  # analysis exists, for a reason unrelated to what this scenario is actually testing.\n  - max_findings: {severity: critical, count: 1}\n",
+  "content_hash": null,
+  "path": "/home/claude/agentdx/scenarios/kill_reviewer.yaml",
+  "resolved": {
+    "assertions": [
+      "no_silent_failures",
+      "deterministic_replay",
+      {
+        "max_findings": {
+          "count": 1,
+          "severity": "critical"
+        }
+      }
+    ],
+    "baseline": {
+      "allow_low_comparability": false,
+      "generate": true,
+      "prompt": null
+    },
+    "blast_radius": {
+      "agents": [],
+      "edges": [],
+      "providers": [],
+      "state_keys": [],
+      "tools": []
+    },
+    "chaos_opt_in": false,
+    "description": "reviewer is crashed mid-flight, non-recoverable, at t=3000ms. Exercises the supervisor's timeout/retry path and the cascade into tester (PRD \u00a712.2 process-class agent_crash: \"Supervisor timeout/retry path exercised; retry bucket grows; possible cascade\").",
+    "exploration": {
+      "enabled": false,
+      "k": 2,
+      "max_schedules": 200
+    },
+    "faults": [
+      {
+        "agent": "reviewer",
+        "allow_total_failure": false,
+        "at_virtual_ts": 3000,
+        "recoverable": false,
+        "type": "agent_crash"
+      }
+    ],
+    "guards": {
+      "max_events": 500000,
+      "max_llm_calls": 500,
+      "max_retries": 20,
+      "max_tokens": 200000,
+      "max_virtual_duration_ms": 120000,
+      "max_wall_duration_s": 300
+    },
+    "hypothesis": {
+      "p95_virtual_duration_ms": "<= 45000",
+      "task_success": ">= 0.9"
+    },
+    "mode": "replay",
+    "repeats": 1,
+    "scenario": "kill_reviewer",
+    "seed": 42,
+    "success_check": {
+      "ref": "fixtures.code_pipeline.checks:task_success",
+      "type": "python"
+    },
+    "target": {
+      "fixture": "code_pipeline"
+    },
+    "task": "fixtures/tasks/refactor_module.md",
+    "version": 1
+  },
+  "scenario_id": "kill_reviewer",
+  "source": "file"
+}

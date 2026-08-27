@@ -1,0 +1,207 @@
+/*
+ * Findings panel styles (PRD §28.3, Design Constraint 5). Same conventions as
+ * `Waterfall.module.css`/`Graph.module.css`: every colour a `tokens.css` custom property
+ * (AGENTS.md §4), `--focus-ring` on every interactive element.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cream);
+  margin: 0;
+}
+
+.count {
+  color: var(--sage);
+  font-size: 0.85em;
+}
+
+.status {
+  color: var(--sage);
+}
+
+.filterBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filterGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--elevation-raised);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-lg);
+  padding: 2px var(--space-2);
+  color: var(--sage);
+  font-size: 0.78em;
+  cursor: pointer;
+}
+
+.filterChip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.filterChipActive {
+  border-color: var(--cream);
+  color: var(--cream);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  background: var(--elevation-raised);
+  border: 1.5px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  color: var(--cream);
+  cursor: pointer;
+}
+
+.row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.rowActive {
+  border-color: var(--fault);
+  box-shadow: 0 0 0 1px var(--fault);
+}
+
+.rowSuppressed {
+  opacity: 0.7;
+}
+
+.rowTop {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.rowTitle {
+  margin: 0;
+  font-size: 0.92em;
+}
+
+.rowAgents {
+  margin: 0;
+  font-size: 0.8em;
+  color: var(--sage);
+}
+
+.rowKey {
+  color: var(--sage);
+}
+
+.rowEvidence {
+  cursor: default;
+}
+
+.rowRecommendation {
+  margin: 0;
+  font-size: 0.8em;
+  color: var(--sage);
+  font-style: italic;
+}
+
+.repro {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0 var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  background: var(--elevation-well);
+  border-radius: var(--radius-sm);
+}
+
+.reproCommand {
+  color: var(--cream);
+  font-size: 0.78em;
+  overflow-x: auto;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.reproCopy {
+  background: var(--elevation-raised);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-sm);
+  color: var(--sage);
+  font-size: 0.75em;
+  padding: 2px var(--space-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.reproCopy:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.reproMissing {
+  margin: var(--space-1) 0 0 var(--space-3);
+  font-size: 0.75em;
+  font-style: italic;
+  color: var(--sage);
+}
+
+.suppressedDrawer {
+  border-top: 1px solid var(--elevation-border);
+  padding-top: var(--space-2);
+}
+
+.suppressedToggle {
+  background: none;
+  border: none;
+  color: var(--sage);
+  font-size: 0.85em;
+  cursor: pointer;
+  padding: 0;
+}
+
+.suppressedToggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

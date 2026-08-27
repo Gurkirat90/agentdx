@@ -1,0 +1,171 @@
+/*
+ * Timeline panel styles (PRD §28.3, §20.2, §20.4). Same conventions as the rest of P16:
+ * `tokens.css` custom properties only (AGENTS.md §4), `--focus-ring` on every interactive
+ * element, motion gated behind `prefers-reduced-motion`.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cream);
+  margin: 0;
+}
+
+.status {
+  color: var(--sage);
+  margin: 0;
+}
+
+.transport {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.transportButton {
+  background: var(--elevation-raised);
+  border: 1px solid var(--elevation-border);
+  color: var(--sage);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  font-size: 0.8em;
+  cursor: pointer;
+}
+
+.transportButton:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.transportButtonActive {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.scrubberWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.track {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--fault);
+  background: transparent;
+  cursor: pointer;
+}
+
+.range:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Ghost baseline marker (§28.3's Timeline row: "ghost-baseline marker") — same dashed-line
+ * treatment as `Waterfall.module.css`'s `.ghostLine`, for visual consistency across panels. */
+.ghostMarker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px dashed var(--cream);
+  pointer-events: none;
+}
+
+.faultMarker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--fault);
+  pointer-events: none;
+}
+
+.findingMarker {
+  position: absolute;
+  top: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  border: 1px solid var(--elevation-well);
+  transform: translateX(-50%);
+  cursor: pointer;
+  padding: 0;
+}
+
+.findingMarker:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.findingMarkerActive {
+  background: var(--crit);
+  width: 10px;
+  height: 10px;
+  top: -3px;
+}
+
+.readout {
+  color: var(--sage);
+  font-size: 0.8em;
+  align-self: flex-end;
+}
+
+.stateTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8em;
+}
+
+.stateTable th,
+.stateTable td {
+  text-align: left;
+  padding: 3px var(--space-2);
+  border-bottom: 1px solid var(--elevation-border);
+  color: var(--cream);
+}
+
+.stateTable th {
+  color: var(--sage);
+  font-weight: 500;
+}
+
+.stateCaption {
+  text-align: left;
+  color: var(--sage);
+  font-size: 0.85em;
+  padding-bottom: var(--space-1);
+}
+
+.stateEmpty {
+  color: var(--sage);
+  font-style: italic;
+}

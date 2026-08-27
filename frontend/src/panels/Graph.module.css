@@ -1,0 +1,274 @@
+/*
+ * Graph panel styles (PRD §28.3, §20.5, §29.6). Follows `Waterfall.module.css`'s established
+ * conventions: every colour is a `tokens.css` custom property (AGENTS.md §4 — no literal hex),
+ * `--focus-ring` on every interactive element, and `prefers-reduced-motion` gates any animation
+ * outright rather than just slowing it down.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cream);
+  margin: 0;
+}
+
+.legend {
+  display: flex;
+  gap: var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85em;
+  color: var(--sage);
+}
+
+/* §29.6: "Fault active: --fault, ring, always visible even under reduced motion" — the legend
+ * entry gets the same token as bare text here deliberately: at this size/weight it is a label,
+ * not data, and --fault (unlike --crit) is the "one high-energy colour" tokens.css calls out,
+ * picked to read clearly against navy. */
+.legendFault {
+  color: var(--fault);
+}
+
+.status {
+  color: var(--sage);
+}
+
+.canvas {
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-sm);
+  background: var(--elevation-well);
+  overflow: hidden;
+}
+
+/* React Flow ships its own stylesheet default (light theme); repaint its chrome to match the
+ * navy/cream palette so nothing white flashes inside the panel. */
+.canvas :global(.react-flow__attribution) {
+  display: none;
+}
+
+.canvas :global(.react-flow__background) {
+  opacity: 0.4;
+}
+
+.canvas :global(.react-flow__edge-path) {
+  stroke: var(--sage-dim);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--elevation-raised);
+  border: 1.5px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  color: var(--cream);
+  cursor: pointer;
+}
+
+.node:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.nodeId {
+  font-family: var(--font-display);
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.nodeRole {
+  font-size: 0.75em;
+  color: var(--sage);
+}
+
+.nodeStats {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 0.7em;
+  color: var(--sage);
+  margin-top: 2px;
+}
+
+.nodeOk {
+  border-color: var(--ok);
+}
+
+/* Agent crashed (§29.6): "solid ring + strike". This is a 3px *border* (a ring), not bare text
+ * or a hairline stroke, so the D-58 accessible-compositing concern (--crit fails WCAG AA as
+ * bare text/thin fill at 2.50:1 on navy) does not apply the same way here: WCAG's non-text
+ * contrast rule (1.4.11) requires 3:1 for a UI-component boundary at this width, not the 4.5:1
+ * text rule D-58 was written against, and --crit on --navy-800/--navy-900 clears 3:1. The strike
+ * (::after) reuses the same token for the same reason — a thick line, not text.
+ */
+.nodeCrashed {
+  border: 3px solid var(--crit);
+  position: relative;
+}
+
+.nodeCrashed::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 50%;
+  border-top: 2px solid var(--crit);
+  pointer-events: none;
+}
+
+.nodeCriticalPath {
+  box-shadow: inset 0 0 0 1.5px var(--cream);
+}
+
+.nodeHighlighted {
+  border-color: var(--cream);
+  box-shadow: 0 0 0 2px var(--cream);
+}
+
+/* Fault active (§29.6): "--fault, ring, always visible even under reduced motion" — the ring
+ * itself (box-shadow) is unconditional; only the *pulse* animation is reduced-motion-gated, so
+ * the fault is never invisible to a reduced-motion user, only static instead of pulsing. */
+.nodeFaulted {
+  box-shadow: 0 0 0 3px var(--fault);
+  animation: faultPulse 1.6s ease-in-out infinite;
+}
+
+.nodeFaultedStatic {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nodeFaulted {
+    animation: none;
+  }
+}
+
+@keyframes faultPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--fault);
+  }
+  50% {
+    box-shadow: 0 0 0 6px var(--fault);
+  }
+}
+
+.edge {
+  cursor: pointer;
+}
+
+.edgeLabel {
+  color: var(--sage);
+  font-size: 10px;
+  background: var(--elevation-well);
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.edgeCriticalPath :global(.react-flow__edge-path) {
+  stroke: var(--cream);
+}
+
+.edgeHighlighted :global(.react-flow__edge-path) {
+  stroke: var(--fault) !important;
+}
+
+/* Live message pulse (§29.7), disabled outright under reduced motion (not just slowed) — the
+ * dash offset keyframe is the only motion this panel adds to an edge. */
+.edgePulse :global(.react-flow__edge-path) {
+  stroke-dasharray: 4 4;
+  animation: dashFlow 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edgePulse :global(.react-flow__edge-path) {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+@keyframes dashFlow {
+  to {
+    stroke-dashoffset: -8;
+  }
+}
+
+/* Heat ramp (PRD §28.3/§29.1): fast → slow, six `tokens.css` steps, edge colour only — width is
+ * a separate inline style driven by message volume (`widthForMessages`). */
+.heat-0 :global(.react-flow__edge-path) {
+  stroke: var(--heat-0);
+}
+
+.heat-1 :global(.react-flow__edge-path) {
+  stroke: var(--heat-1);
+}
+
+.heat-2 :global(.react-flow__edge-path) {
+  stroke: var(--heat-2);
+}
+
+.heat-3 :global(.react-flow__edge-path) {
+  stroke: var(--heat-3);
+}
+
+.heat-4 :global(.react-flow__edge-path) {
+  stroke: var(--heat-4);
+}
+
+.heat-5 :global(.react-flow__edge-path) {
+  stroke: var(--heat-5);
+}
+
+.overflowList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* §29.9-style accessible fallback (identical pattern to `Waterfall.module.css`'s
+ * `.srOnlyTable`): visually hidden, not `display:none`, so it stays in the accessibility tree
+ * and reachable by keyboard/screen reader while never appearing in the sighted layout. */
+.srOnlyTable {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,0 +1,34 @@
+{
+  "fixture": "code_pipeline",
+  "run_id": "r_90089",
+  "state": {
+    "at_seq": 17,
+    "at_virtual_ts": 23,
+    "keys": [
+      {
+        "key": "draft.module_a",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:be160693c29a553259f02bdf4a7a3bad5ccd86a012ff382835f33e4c50f6b1b8",
+        "writer": "coder",
+        "written_at_seq": 13
+      },
+      {
+        "key": "draft.module_b",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:f8a6fbd613e33be0485f74cec7ca7f879bf65439fc61f5f5e14ff0beb5380076",
+        "writer": "coder",
+        "written_at_seq": 17
+      },
+      {
+        "key": "plan",
+        "size_bytes": null,
+        "value": null,
+        "value_hash": "blake2b:97f7843811ce46d282d4edff27b7bee1ee026042880906fef0b721313c971f56",
+        "writer": "planner",
+        "written_at_seq": 2
+      }
+    ]
+  }
+}
