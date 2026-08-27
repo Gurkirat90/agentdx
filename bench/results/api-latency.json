@@ -3,56 +3,56 @@
   "environment": {
     "flat_log_events": 6001,
     "implementation": "CPython",
-    "machine": "x86_64",
-    "processor": "x86_64",
-    "python": "3.12.3",
+    "machine": "arm64",
+    "processor": "arm",
+    "python": "3.12.2",
     "repeats": 5,
-    "system": "Linux",
+    "system": "Darwin",
     "waterfall_log_spans": 5000
   },
   "gate_status": "Informational, not a hard CI gate (\u00a726.3 is a performance expectation, not an NFR with its own pass/fail requirement elsewhere in the PRD). See each row's 'met_on_worst' for whether the slowest observed sample beat the stated target on this run's machine.",
   "measurements": {
     "get_events_1000": {
-      "best_ms": 53.815,
-      "met_on_worst": false,
+      "best_ms": 21.576,
+      "met_on_worst": true,
       "target_ms": 100.0,
-      "worst_ms": 140.41
+      "worst_ms": 39.85
     },
     "get_findings": {
-      "best_ms": 5.379,
+      "best_ms": 1.604,
       "met_on_worst": true,
       "target_ms": 50.0,
-      "worst_ms": 9.962
+      "worst_ms": 3.914
     },
     "get_run_detail": {
-      "best_ms": 10.575,
+      "best_ms": 3.391,
       "met_on_worst": true,
       "target_ms": 50.0,
-      "worst_ms": 40.746
+      "worst_ms": 26.806
     },
     "get_state": {
-      "best_ms": 171.894,
-      "met_on_worst": false,
+      "best_ms": 81.292,
+      "met_on_worst": true,
       "target_ms": 100.0,
-      "worst_ms": 182.106
+      "worst_ms": 86.572
     },
     "get_waterfall_5000_spans": {
-      "best_ms": 775.734,
+      "best_ms": 305.782,
       "met_on_worst": false,
       "target_ms": 150.0,
-      "worst_ms": 901.599
+      "worst_ms": 363.389
     },
     "post_runs": {
-      "best_ms": 4.702,
+      "best_ms": 1.348,
       "met_on_worst": true,
       "target_ms": 200.0,
-      "worst_ms": 6.52
+      "worst_ms": 2.288
     },
     "ws_backlog_5000_events": {
-      "best_ms": 369.365,
+      "best_ms": 155.17,
       "met_on_worst": true,
       "target_ms": 1000.0,
-      "worst_ms": 499.553
+      "worst_ms": 198.056
     }
   },
   "method": "Each row is run `repeats` times against a real `fastapi.testclient.TestClient` (real routing, dependency injection, Pydantic response validation) over a real SQLite-backed Store; the SLOWEST sample is reported. This is a coarser statistic than the PRD's own 'p95' column \u2014 see 'not_measured'.",

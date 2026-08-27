@@ -140,3 +140,22 @@ bench SUITE="all":
 # Gate G10 — cold `docker compose up` to a healthy /api/health in < 180 s
 bench-docker-cold:
     uv run python bench/harness/docker_cold_start.py
+
+# ---------------------------------------------------------------------------
+# Acceptance — PRD §44.1's ten global gates, one command (P18/19)
+# ---------------------------------------------------------------------------
+
+# Run all ten G1-G10 gates (each the literal §44.1 verification command) and print a
+# pass/fail table. Exits 0 only if all ten pass. NOT part of `just ci` — see
+# tests/acceptance/test_gates.py's module docstring for why these stay out of the
+# routine loop. `-k` a single gate (e.g. `just acceptance G3`) to run just one.
+acceptance FILTER="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rm -rf tests/acceptance/.results
+    if [ -n "{{FILTER}}" ]; then
+      uv run pytest tests/acceptance/ -m acceptance -k "{{FILTER}}" -q
+    else
+      uv run pytest tests/acceptance/ -m acceptance -q
+    fi
+    uv run python scripts/print_acceptance_table.py

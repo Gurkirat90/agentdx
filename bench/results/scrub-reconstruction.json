@@ -1,0 +1,52 @@
+{
+  "benchmark": "scrub-reconstruction",
+  "environment": {
+    "implementation": "CPython",
+    "machine": "arm64",
+    "processor": "arm",
+    "python": "3.12.2",
+    "snapshot_interval_events": 500,
+    "system": "Darwin"
+  },
+  "fr10_headroom": {
+    "events": 50003,
+    "max_ms": 8.346,
+    "met": true,
+    "min_ms": 0.136,
+    "name": "fr10_headroom_50000_events",
+    "p50_ms": 3.894,
+    "p95_ms": 7.433,
+    "p99_ms": 8.039,
+    "samples": 200,
+    "threshold_ms": 200.0,
+    "virtual_ts_range_ms": [
+      10,
+      500030
+    ]
+  },
+  "function_under_test": "agentdx.store.snapshots.state_at(store, run_id, virtual_ts_ms)",
+  "met": true,
+  "method": "Each configuration builds a fresh log via `build_log_of_length`, ingests it through `SnapshottingStore` (inline snapshots every 500 events, the real recording path), then samples `--samples` virtual timestamps uniformly at random (seeded) across the run's own timespan and times `state_at` for each \u2014 log construction and ingestion are excluded from every timed sample. Percentiles are nearest-rank over the sorted sample, not interpolated.",
+  "requirement": "FR-10 / PRD \u00a720.4",
+  "requirement_text": "FR-10: scrubbing reconstructs state at an arbitrary virtual timestamp in <200ms p95. PRD \u00a720.4: 'Target: <100 ms for a 5 000-event run.'",
+  "section_20_4": {
+    "events": 5007,
+    "max_ms": 6.807,
+    "met": true,
+    "min_ms": 0.07,
+    "name": "section_20_4_5000_events",
+    "p50_ms": 3.409,
+    "p95_ms": 6.425,
+    "p99_ms": 6.717,
+    "samples": 200,
+    "threshold_ms": 100.0,
+    "virtual_ts_range_ms": [
+      10,
+      50070
+    ]
+  },
+  "thresholds": {
+    "fr10_p95_ms": 200.0,
+    "section_20_4_ms": 100.0
+  }
+}
