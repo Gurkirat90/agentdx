@@ -20,6 +20,7 @@ single commit can fix, which is its own kind of alarm fatigue this project's cul
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -61,6 +62,18 @@ def _run_gate(
         (RESULTS_DIR / f"{gate_id}.json").write_text(json.dumps(result, indent=2))
         pytest.fail(f"{gate_id}: '{binary}' not found on PATH — command never ran.")
 
+    # PYTHONHASHSEED=0 is required project-wide (AGENTS.md §4.1), not just inside a `just`
+    # recipe -- `just`'s own `export PYTHONHASHSEED := "0"` (justfile line 11) is *a* way to
+    # set it, not *the* requirement. Found 2026-08-27 by the repo owner running this suite
+    # directly (`pytest tests/acceptance/...`, bypassing `just`): without it, G3's literal
+    # command correctly, loudly refuses to run (`E-SCHED-004`, `DeterminismLeakError`) rather
+    # than risk a false determinism claim -- exactly as designed. That is not a G3 defect;
+    # it is this harness failing to reproduce the one environment guarantee every other gate
+    # command already gets for free when launched via `just acceptance`. Setting it here
+    # makes `pytest tests/acceptance/ -m acceptance` self-sufficient regardless of how it is
+    # invoked, matching every other gate's real command exactly as a user would run it by
+    # hand with the seed pinned (which the project requires unconditionally, not optionally).
+    env = {**os.environ, "PYTHONHASHSEED": "0"}
     try:
         proc = subprocess.run(  # noqa: S603
             command,
@@ -68,6 +81,7 @@ def _run_gate(
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            env=env,
         )
         returncode: int | None = proc.returncode
         stdout_tail = proc.stdout[-4000:]
@@ -204,9 +218,13 @@ def test_g8_control_tower_renders_and_cross_highlights() -> None:
 def test_g9_offline_demo() -> None:
     """PRD §44.1 G9: the full three-fixture demo works offline, no API keys present.
 
-    Never waived (PRD §44.3 maps this to I7). Known-red as of 2026-08-27: `just
-    demo-offline` calls `agentdx run fixtures/...` directly, so it inherits G1's `sdk/`
-    fan-out deadlock the instant a real (non-golden-log) run is attempted.
+    Never waived (PRD §44.3 maps this to I7). Known-red as of 2026-08-27, corrected same
+    day against a real run (Python 3.12, real `just`, repo owner's machine): `just
+    demo-offline` fails at exit 7, `"no scenario files found under fixtures/code_pipeline"`
+    -- a fixture/scenario-resolution gap in `agentdx run`'s target handling, reached before
+    the previously-documented `sdk/`-spawn deadlock (G1) ever comes into play. This
+    session's first guess (that G9 simply inherits G1's deadlock) was wrong; corrected here
+    rather than left stale now that a real run exists to check it against.
     """
     _run_gate("G9", ["just", "demo-offline"], timeout_s=180)
 
