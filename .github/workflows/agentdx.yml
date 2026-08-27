@@ -1,0 +1,46 @@
+# The shipped example: PRD §22.5 ("shipped in-repo") and §45.17's "the repro scenario is
+# committed and wired into CI". Runs every committed scenario under `--ci`, uploads the
+# JUnit XML + JSON summary regardless of outcome, and fails the job on any non-zero exit
+# (§37.2/§22.2's exit-code table — a `run:` step's own exit code is what GitHub Actions
+# already gates on, so no extra `if:` logic is needed for that part).
+#
+# **No secrets configured** — every scenario here runs `--cache-mode replay` against the
+# committed fixture cache (I7: offline, free, reproducible), so this workflow needs no API
+# key at all. Restoring `.agentdx/cache.db` from the GitHub Actions cache (keyed on the
+# fixture/scenario tree) is what makes each run both fast and hermetic.
+name: agentdx
+on: [pull_request]
+jobs:
+  reliability:
+    runs-on: ubuntu-latest
+    env:
+      # Required project-wide; `agentdx doctor` checks it (AGENTS.md §4.1).
+      PYTHONHASHSEED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: Restore LLM cache
+        uses: actions/cache@v4
+        with:
+          path: .agentdx/cache.db
+          key: agentdx-cache-${{ hashFiles('fixtures/**', 'scenarios/**') }}
+
+      - name: Validate scenarios
+        run: uv run agentdx scenario validate scenarios/
+
+      - name: Run reliability scenarios
+        run: >
+          uv run agentdx run scenarios/ --ci --format junit --out ci-out/
+          --cache-mode replay
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentdx-results
+          path: ci-out/
