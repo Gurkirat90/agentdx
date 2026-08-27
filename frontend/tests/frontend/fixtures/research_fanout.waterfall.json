@@ -1,0 +1,134 @@
+{
+  "fixture": "research_fanout",
+  "run_id": "r_52adb",
+  "waterfall": {
+    "baseline_makespan_ms": null,
+    "lanes": [
+      {
+        "agent": "worker_1",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 9,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "web_search",
+            "on_critical_path": true,
+            "seq_end": 10,
+            "seq_start": 8,
+            "span_id": "d3f387717eb7",
+            "start_ms": 9,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 12,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "summarise",
+            "on_critical_path": true,
+            "seq_end": 13,
+            "seq_start": 11,
+            "span_id": "2bf7bd011eea",
+            "start_ms": 12,
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "agent": "worker_2",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 20,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "web_search",
+            "on_critical_path": false,
+            "seq_end": 21,
+            "seq_start": 19,
+            "span_id": "1900f11c6e72",
+            "start_ms": 20,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 23,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "summarise",
+            "on_critical_path": false,
+            "seq_end": 24,
+            "seq_start": 22,
+            "span_id": "7de34d6a1022",
+            "start_ms": 23,
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "agent": "worker_3",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 31,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "web_search",
+            "on_critical_path": false,
+            "seq_end": 32,
+            "seq_start": 30,
+            "span_id": "8accc19bd84d",
+            "start_ms": 31,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 34,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "summarise",
+            "on_critical_path": false,
+            "seq_end": 35,
+            "seq_start": 33,
+            "span_id": "8f1ac684730a",
+            "start_ms": 34,
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "agent": "worker_4",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 42,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "web_search",
+            "on_critical_path": false,
+            "seq_end": 43,
+            "seq_start": 41,
+            "span_id": "05774868122a",
+            "start_ms": 42,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 45,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "summarise",
+            "on_critical_path": false,
+            "seq_end": 46,
+            "seq_start": 44,
+            "span_id": "cb8368f83708",
+            "start_ms": 45,
+            "status": "ok"
+          }
+        ]
+      }
+    ],
+    "virtual_makespan_ms": 63
+  }
+}

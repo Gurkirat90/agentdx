@@ -1,0 +1,116 @@
+{
+  "fixture": "code_pipeline",
+  "run_id": "r_90089",
+  "waterfall": {
+    "baseline_makespan_ms": null,
+    "lanes": [
+      {
+        "agent": "coder",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 8,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "read_file",
+            "on_critical_path": true,
+            "seq_end": 9,
+            "seq_start": 7,
+            "span_id": "966640563638",
+            "start_ms": 8,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 11,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "write_draft",
+            "on_critical_path": true,
+            "seq_end": 12,
+            "seq_start": 10,
+            "span_id": "5f55856dac38",
+            "start_ms": 11,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 15,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "write_draft",
+            "on_critical_path": true,
+            "seq_end": 16,
+            "seq_start": 14,
+            "span_id": "bb943fc038ff",
+            "start_ms": 15,
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "agent": "reviewer",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 23,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "read_file",
+            "on_critical_path": false,
+            "seq_end": 24,
+            "seq_start": 22,
+            "span_id": "82666ba4ec7d",
+            "start_ms": 23,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 26,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "write_draft",
+            "on_critical_path": false,
+            "seq_end": 27,
+            "seq_start": 25,
+            "span_id": "1539b0159eb5",
+            "start_ms": 26,
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "agent": "tester",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 38,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "run_tests",
+            "on_critical_path": true,
+            "seq_end": 39,
+            "seq_start": 37,
+            "span_id": "b3e1d74fed88",
+            "start_ms": 38,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 41,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "lint",
+            "on_critical_path": true,
+            "seq_end": 42,
+            "seq_start": 40,
+            "span_id": "3db89dae9bde",
+            "start_ms": 41,
+            "status": "ok"
+          }
+        ]
+      }
+    ],
+    "virtual_makespan_ms": 47
+  }
+}

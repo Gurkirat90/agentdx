@@ -1,0 +1,108 @@
+.shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--elevation-raised);
+  border-bottom: 1px solid var(--elevation-border);
+  color: var(--sage);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--cream);
+  text-decoration: none;
+}
+
+.brand:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.scorecardLink {
+  margin-left: auto;
+  color: var(--cream);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  text-decoration: none;
+}
+
+.scorecardLink:hover {
+  background: var(--elevation-well);
+}
+
+.scorecardLink:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* PRD §28.1: outer vertical split (Graph | Chaos+Findings stack, then Waterfall below), with
+ * the Timeline bar spanning full width beneath everything — `grid-template-areas` names each
+ * region once so the single-column breakpoint below can redeclare the *whole* layout (and
+ * therefore each panel's document order) in one place, matching §29.5's differing mobile
+ * priority order, without any row/column index arithmetic or overlap-prone positioning. */
+.main {
+  padding: var(--space-4);
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  grid-template-rows: minmax(160px, auto) minmax(160px, auto) minmax(240px, 1fr) auto;
+  grid-template-areas:
+    'graph chaos'
+    'graph findings'
+    'waterfall waterfall'
+    'timeline timeline';
+  gap: var(--space-4);
+}
+
+.graphArea {
+  grid-area: graph;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* §28.1's literal `<Stack> ChaosPanel FindingsPanel` — Chaos above Findings, next to Graph. */
+.chaosArea {
+  grid-area: chaos;
+  overflow-y: auto;
+}
+
+.findingsArea {
+  grid-area: findings;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.waterfallArea {
+  grid-area: waterfall;
+  min-width: 0;
+}
+
+.timelineArea {
+  grid-area: timeline;
+}
+
+/* Single-column stacking below a reasonable panel-width breakpoint (PRD §29.5: "single-column
+ * stacking" is part of the documented information-priority ordering, not just a mobile
+ * afterthought). Order follows §29.5 exactly: verdict (topbar, unaffected) · findings ·
+ * critical path (folded into waterfall) · waterfall · graph · chaos controls — last. */
+@media (max-width: 900px) {
+  .main {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    grid-template-areas:
+      'findings'
+      'waterfall'
+      'graph'
+      'chaos'
+      'timeline';
+  }
+}

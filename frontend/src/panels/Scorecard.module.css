@@ -1,0 +1,159 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.status {
+  color: var(--sage);
+}
+
+.panelTitle {
+  font-family: var(--font-display);
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cream);
+  margin: 0;
+}
+
+.headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--elevation-border);
+  padding-bottom: var(--space-3);
+}
+
+.headlineLabel {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--cream);
+}
+
+.headlineValue {
+  font-size: 1.4em;
+  font-weight: 600;
+}
+
+.faster {
+  color: var(--ok);
+}
+
+.slower {
+  color: var(--warn);
+}
+
+.headlineWord {
+  color: var(--sage);
+  font-size: 0.9em;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.row dt {
+  color: var(--sage);
+}
+
+.row dd {
+  margin: 0;
+  color: var(--cream);
+  text-align: right;
+}
+
+.buckets {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--elevation-border);
+  border-bottom: 1px solid var(--elevation-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.bucketRow {
+  display: grid;
+  grid-template-columns: 10em auto auto 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  color: var(--cream);
+}
+
+.bucketLabel {
+  color: var(--sage);
+}
+
+.comparability {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.comparabilityHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--cream);
+  font-weight: 600;
+}
+
+.grade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+}
+
+.gradeA {
+  background: var(--ok);
+  color: var(--navy-950);
+}
+
+.gradeB {
+  background: var(--warn);
+  color: var(--navy-950);
+}
+
+.gradeC {
+  background: var(--crit);
+  color: var(--cream);
+}
+
+/* Solid fill, not `color: var(--crit)`: same 2.50:1-against-navy-900 AA failure as
+ * Badge.module.css's `.crit` and EvidenceLink.module.css's `.missing` — see those comments.
+ * `--crit` still marks the border/fill; `--cream` carries the text. */
+.lowComparability {
+  font-size: 0.8em;
+  background: var(--crit);
+  color: var(--cream);
+  border: 1px solid var(--crit);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+.comparabilityDetail {
+  margin: 0;
+  color: var(--sage);
+  font-size: 0.85em;
+}

@@ -1,0 +1,51 @@
+.wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.seqLabel {
+  color: var(--sage);
+  font-size: 0.85em;
+  margin-right: 2px;
+}
+
+.seq,
+.span {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  margin: 0;
+  color: var(--sage);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.seq:hover,
+.span:hover {
+  color: var(--cream);
+}
+
+.seq:focus-visible,
+.span:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Solid fill, not `color: var(--crit)` on the panel background: `--crit` (PRD §29.1's exact
+ * `#A8443A`) measures 2.50:1 against `--navy-900` — below WCAG AA's 4.5:1 text floor (caught
+ * by axe-core's color-contrast rule in tests/frontend/e2e/axe.spec.ts). `--cream` on a
+ * `--crit` fill measures 4.715:1 — same accessible pattern as Badge.module.css's `.crit` and
+ * Scorecard.module.css's `.gradeC`/`.lowComparability`. */
+.missing {
+  display: inline-block;
+  background: var(--crit);
+  color: var(--cream);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  font-style: italic;
+}

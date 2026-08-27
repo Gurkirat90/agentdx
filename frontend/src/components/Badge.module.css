@@ -1,0 +1,59 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.8em;
+  line-height: 1.6;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: var(--elevation-well);
+}
+
+.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--elevation-well);
+}
+
+/* Solid fill, not outlined like the other tones: `--crit` (PRD §29.1's exact hex,
+ * `#A8443A`) measures 2.50:1 against `--navy-900` and 2.94:1 against `--elevation-well` —
+ * below WCAG AA's 3:1 floor even for non-text use, let alone 4.5:1 for this badge's own text
+ * size. `--cream` text on a `--crit` fill measures 4.715:1, clearing AA normal text, and uses
+ * no colour outside the PRD-specified palette (verified in
+ * tests/frontend/unit/tokenContrast.test.ts). */
+.crit {
+  color: var(--cream);
+  border-color: var(--crit);
+  background: var(--crit);
+}
+
+.fault {
+  color: var(--fault);
+  border-color: var(--fault);
+  background: var(--elevation-well);
+}
+
+.neutral {
+  color: var(--sage);
+  border-color: var(--navy-700);
+  background: var(--elevation-well);
+}

@@ -37,7 +37,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.js'],
+    // Node-side tooling scripts (package.json's `generate:api`/`check:hex-literals`/
+    // `gen:fixtures`) — plain Node ESM, not part of the app's tsconfig project, so typed
+    // linting doesn't apply.
+    files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
+    languageOptions: { globals: globals.node },
     extends: [tseslint.configs.disableTypeChecked],
   },
 );

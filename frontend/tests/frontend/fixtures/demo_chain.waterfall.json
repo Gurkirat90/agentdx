@@ -1,0 +1,46 @@
+{
+  "run_id": "r_test01",
+  "fixture": "demo_chain",
+  "waterfall": {
+    "virtual_makespan_ms": 19,
+    "baseline_makespan_ms": 38,
+    "lanes": [
+      {
+        "agent": "alpha",
+        "spans": [
+          {
+            "span_id": "Orch1",
+            "kind": "llm_call",
+            "name": "plan",
+            "start_ms": 2,
+            "end_ms": 7,
+            "bucket": null,
+            "on_critical_path": true,
+            "status": "ok",
+            "fault_id": null,
+            "seq_start": 1,
+            "seq_end": 3
+          }
+        ]
+      },
+      {
+        "agent": "beta",
+        "spans": [
+          {
+            "span_id": "Work",
+            "kind": "tool_call",
+            "name": "execute",
+            "start_ms": 10,
+            "end_ms": 16,
+            "bucket": null,
+            "on_critical_path": true,
+            "status": "ok",
+            "fault_id": null,
+            "seq_start": 5,
+            "seq_end": 8
+          }
+        ]
+      }
+    ]
+  }
+}

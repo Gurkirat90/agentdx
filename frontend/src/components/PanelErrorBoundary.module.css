@@ -1,0 +1,18 @@
+.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 80px;
+  padding: var(--space-4);
+  background: var(--elevation-well);
+  border: 1px solid var(--crit);
+  border-radius: var(--radius-md);
+}
+
+.message {
+  margin: 0;
+  color: var(--cream);
+  font-size: 0.9em;
+  text-align: center;
+}

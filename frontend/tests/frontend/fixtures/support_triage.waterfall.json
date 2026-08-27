@@ -1,0 +1,72 @@
+{
+  "fixture": "support_triage",
+  "run_id": "r_08ea8",
+  "waterfall": {
+    "baseline_makespan_ms": null,
+    "lanes": [
+      {
+        "agent": "retriever_a",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 9,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "vector_search",
+            "on_critical_path": false,
+            "seq_end": 10,
+            "seq_start": 8,
+            "span_id": "6a3156776b5e",
+            "start_ms": 9,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 12,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "kb_lookup",
+            "on_critical_path": false,
+            "seq_end": 13,
+            "seq_start": 11,
+            "span_id": "77ed8f3a7497",
+            "start_ms": 12,
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "agent": "retriever_b",
+        "spans": [
+          {
+            "bucket": null,
+            "end_ms": 20,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "vector_search",
+            "on_critical_path": false,
+            "seq_end": 21,
+            "seq_start": 19,
+            "span_id": "639de45021c5",
+            "start_ms": 20,
+            "status": "ok"
+          },
+          {
+            "bucket": null,
+            "end_ms": 23,
+            "fault_id": null,
+            "kind": "tool_call",
+            "name": "ticket_history",
+            "on_critical_path": false,
+            "seq_end": 24,
+            "seq_start": 22,
+            "span_id": "03b22716df56",
+            "start_ms": 23,
+            "status": "ok"
+          }
+        ]
+      }
+    ],
+    "virtual_makespan_ms": 40
+  }
+}

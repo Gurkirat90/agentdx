@@ -1,0 +1,52 @@
+.row {
+  display: grid;
+  grid-template-columns: minmax(8em, auto) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.label {
+  color: var(--sage);
+  font-size: 0.9em;
+}
+
+.track {
+  height: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--elevation-well);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+}
+
+.ok {
+  background: var(--ok);
+}
+
+.warn {
+  background: var(--warn);
+}
+
+.crit {
+  background: var(--crit);
+}
+
+.neutral {
+  background: var(--sage);
+}
+
+.value {
+  color: var(--cream);
+  text-align: right;
+  min-width: 3em;
+}

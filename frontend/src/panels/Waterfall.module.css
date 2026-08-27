@@ -1,0 +1,188 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--elevation-base);
+  border: 1px solid var(--elevation-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cream);
+  margin: 0;
+}
+
+.legend {
+  display: flex;
+  gap: var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85em;
+  color: var(--sage);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.legendSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+
+.status {
+  color: var(--sage);
+}
+
+.scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.laneLabel {
+  fill: var(--sage);
+  font-size: 11px;
+  dominant-baseline: middle;
+}
+
+.axisLabel {
+  fill: var(--sage);
+  font-size: 10px;
+}
+
+.span {
+  cursor: pointer;
+  stroke-width: 1.5;
+}
+
+.span:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.criticalPath {
+  opacity: 1;
+  stroke: var(--cream);
+}
+
+.offPath {
+  opacity: 0.55;
+  stroke: none;
+}
+
+.selected {
+  stroke: var(--fault);
+  stroke-width: 2;
+}
+
+.fill-work {
+  fill: var(--cream);
+}
+
+.fill-blocking_wait {
+  fill: var(--navy-700);
+}
+
+.fill-handoff {
+  fill: var(--clay);
+}
+
+.fill-retry {
+  fill: var(--warn);
+}
+
+.scrubLine {
+  stroke: var(--fault);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+  pointer-events: none;
+}
+
+/* Ghost baseline (§29.4) — kept visually understated except the labelled line/text itself,
+ * so it reads as background context the bars are measured against. */
+.ghost {
+  pointer-events: none;
+}
+
+.ghostLine {
+  stroke: var(--cream);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.ghostLabel {
+  fill: var(--cream);
+  font-size: 11px;
+}
+
+.ghostSlower {
+  fill: var(--warn);
+}
+
+.ghostFaster {
+  fill: var(--ok);
+}
+
+.ghostPending {
+  pointer-events: none;
+}
+
+.ghostPendingLabel {
+  fill: var(--sage);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.spinner {
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* §29.9: the waterfall exposes a data table alternative for screen readers. Visually hidden,
+ * not display:none (which would remove it from the accessibility tree too). */
+.srOnlyTable {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

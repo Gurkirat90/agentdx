@@ -1,0 +1,78 @@
+{
+  "run_id": "r_demo_chain",
+  "speedup": {
+    "achieved": 2.0,
+    "ideal_parallel": 0.5789473684210527,
+    "overhead_cost": 1.4210526315789473,
+    "gap": -1.4210526315789473,
+    "total_work_ms": 11,
+    "critical_path_ms": 19,
+    "virtual_makespan_multi_ms": 19,
+    "virtual_makespan_baseline_ms": 38,
+    "evidence_seq": [
+      0,
+      9,
+      100,
+      102
+    ]
+  },
+  "buckets": [
+    {
+      "bucket": "retry_recovery",
+      "critical_path_ms": 0,
+      "gap_contribution": 0.0,
+      "evidence_seq": []
+    },
+    {
+      "bucket": "redundant_work",
+      "critical_path_ms": 0,
+      "gap_contribution": 0.0,
+      "evidence_seq": []
+    },
+    {
+      "bucket": "orchestration",
+      "critical_path_ms": 0,
+      "gap_contribution": 0.0,
+      "evidence_seq": []
+    },
+    {
+      "bucket": "handoff",
+      "critical_path_ms": 3,
+      "gap_contribution": 0.48921484037963753,
+      "evidence_seq": [
+        4,
+        6
+      ]
+    },
+    {
+      "bucket": "blocking_wait",
+      "critical_path_ms": 5,
+      "gap_contribution": 0.9318377911993099,
+      "evidence_seq": [
+        0,
+        1,
+        5,
+        9
+      ]
+    },
+    {
+      "bucket": "unattributed",
+      "critical_path_ms": 0,
+      "gap_contribution": 0.0,
+      "evidence_seq": []
+    }
+  ],
+  "tokens": {
+    "multi": 30,
+    "baseline": 150,
+    "cost_multiplier": 0.2,
+    "cost_efficiency": 10.0
+  },
+  "comparability": {
+    "grade": "A",
+    "cache_reuse_rate": 1.0,
+    "cache_reuse_tool_rate": 1.0,
+    "cache_reuse_llm_rate": 1.0,
+    "reason": "cache reuse 100%, identical model/tools/task, both runs succeeded"
+  }
+}

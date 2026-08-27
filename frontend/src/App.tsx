@@ -1,20 +1,34 @@
 /**
- * Control Tower shell.
- *
- * P01 placeholder: it exists so the TypeScript and eslint gates run against real
- * code from day one. The panel layout, the Zustand store and the generated API
- * client land at P14–P16 (CONTEXT.md §5, rows 14–16).
+ * Control Tower shell (PRD §28.1). Replaces the P01 scaffold now that the store, the
+ * generated API client and the routes this prompt owns all exist.
  */
+import { RunListRoute } from './routes/RunListRoute';
+import { RunRoute } from './routes/RunRoute';
+import { ScorecardRoute } from './routes/ScorecardRoute';
+import { RouterProvider, useRoute } from './routes/router';
+
+function Routes(): React.JSX.Element {
+  const route = useRoute();
+  switch (route.name) {
+    case 'run-list':
+      return <RunListRoute />;
+    case 'run':
+      return <RunRoute runId={route.runId} />;
+    case 'run-scorecard':
+      return <ScorecardRoute runId={route.runId} />;
+    case 'not-found':
+      return (
+        <main style={{ padding: 'var(--space-8)' }}>
+          <p>No route for &quot;{route.path}&quot;.</p>
+        </main>
+      );
+  }
+}
+
 export function App(): React.JSX.Element {
   return (
-    <main style={{ padding: 'var(--space-8)' }}>
-      <h1 style={{ fontFamily: 'var(--font-display)', margin: 0 }}>AgentDX Control Tower</h1>
-      <p style={{ color: 'var(--sage)' }}>
-        Scaffold only — no run data yet. See CONTEXT.md §5 for build state.
-      </p>
-      <p className="numeric" style={{ color: 'var(--sage-dim)' }}>
-        Bounded search: absence of findings is not proof of absence.
-      </p>
-    </main>
+    <RouterProvider>
+      <Routes />
+    </RouterProvider>
   );
 }
