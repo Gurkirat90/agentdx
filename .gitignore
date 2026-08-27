@@ -24,6 +24,8 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/test-results/          # Playwright's own run artifacts (traces, screenshots) -- G8 output, never a source of truth
+frontend/playwright-report/
 src/agentdx/api/static/          # built frontend, copied in at package time (PRD §39.4)
 
 # AgentDX runtime data (PRD §39.1) — never committed
