@@ -24,7 +24,8 @@ happens to start or end on.
 Rule E1: the JSON this writes is the file every published scrub-latency number must cite with
 a `[bench:scrub-reconstruction.json]` marker.
 
-Usage: `python3.12 bench/harness/scrub_reconstruction.py [--events N] [--large-events N] [--samples N]`
+Usage: `python3.12 bench/harness/scrub_reconstruction.py [--events N] [--large-events N]
+[--samples N]`
 Exit codes: 0 both thresholds were met · 2 either was not.
 """
 
@@ -70,9 +71,11 @@ SAMPLE_SEED = 42
 
 
 def _seed_store(events: list[Event], directory: Path) -> tuple[SnapshottingStore, str]:
-    """Ingest a pre-built log through `SnapshottingStore`, the same inline-snapshot path a
-    real recorded run takes (`store/snapshots.py`'s own class docstring: "use this class
-    wherever a run is being recorded")."""
+    """Ingest a pre-built log through `SnapshottingStore`.
+
+    The same inline-snapshot path a real recorded run takes (`store/snapshots.py`'s own
+    class docstring: "use this class wherever a run is being recorded").
+    """
     chained = [
         ChainedEvent(event=event, prev_hash=prev, this_hash=this)
         for event, (prev, this) in zip(events, build_chain(events), strict=True)
@@ -86,20 +89,25 @@ def _seed_store(events: list[Event], directory: Path) -> tuple[SnapshottingStore
 
 
 def _percentile(sorted_values: list[float], p: float) -> float:
-    """Nearest-rank percentile over an already-sorted list — no interpolation, so the reported
-    figure is always one of the samples actually measured, never an invented in-between value."""
+    """Nearest-rank percentile over an already-sorted list.
+
+    No interpolation, so the reported figure is always one of the samples actually
+    measured, never an invented in-between value.
+    """
     if not sorted_values:
         return 0.0
-    idx = min(len(sorted_values) - 1, max(0, int(round(p / 100 * (len(sorted_values) - 1)))))
+    idx = min(len(sorted_values) - 1, max(0, round(p / 100 * (len(sorted_values) - 1))))
     return sorted_values[idx]
 
 
 def measure(name: str, target_events: int, samples: int, seed: int) -> dict[str, object]:
-    """Build one log of `target_events`, ingest it, sample `samples` random scrub positions,
-    and return the latency distribution — construction and ingestion excluded from every
-    timed sample, same discipline as `store_write_throughput.py`."""
+    """Build one log of `target_events`, ingest it, and sample `samples` random scrub positions.
+
+    Returns the latency distribution — construction and ingestion excluded from every
+    timed sample, same discipline as `store_write_throughput.py`.
+    """
     events = build_log_of_length(target_events)
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 -- benchmark sample selection, not cryptographic
     min_ts = min(e.virtual_ts_ms for e in events)
     max_ts = max(e.virtual_ts_ms for e in events)
     targets = [rng.randint(min_ts, max_ts) for _ in range(samples)]
@@ -141,7 +149,9 @@ def main() -> int:
     args = parser.parse_args()
 
     section_run = measure("section_20_4_5000_events", args.events, args.samples, SAMPLE_SEED)
-    large_run = measure("fr10_headroom_50000_events", args.large_events, args.samples, SAMPLE_SEED + 1)
+    large_run = measure(
+        "fr10_headroom_50000_events", args.large_events, args.samples, SAMPLE_SEED + 1
+    )
 
     section_p95 = float(str(section_run["p95_ms"]))
     large_p95 = float(str(large_run["p95_ms"]))
@@ -162,6 +172,12 @@ def main() -> int:
             "p95. PRD §20.4: 'Target: <100 ms for a 5 000-event run.'"
         ),
         "function_under_test": "agentdx.store.snapshots.state_at(store, run_id, virtual_ts_ms)",
+        "gate_status": (
+            "Pass/fail against threshold is the claim; the exact p50/p95/p99 millisecond "
+            "figures are real wall-clock measurements and will vary run to run and machine "
+            "to machine (D-68). Any prose citing this file must reference the threshold "
+            "result, not quote a specific digit as a permanent fact."
+        ),
         "thresholds": {
             "section_20_4_ms": SECTION_TARGET_MS,
             "fr10_p95_ms": FR10_TARGET_P95_MS,

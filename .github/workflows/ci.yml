@@ -124,12 +124,14 @@ jobs:
       - run: cd frontend && npx playwright install --with-deps chromium
 
       # Informational for now, NOT blocking (continue-on-error) -- added by the P18/19
-      # QA-acceptance session, 2026-08-27. As of that session's own real run: 2/10 gates
-      # pass (G2, G3, G5 -- wait, see tests/acceptance/.results for the exact set; the
-      # honest count is in CONTEXT.md §6). G1, G4, G6, G7, G9 depend on CLI surfaces
-      # (`--assert`, `scenario run --repeat`, `compare --baseline`, `analyze --scorecard`)
-      # that are explicit, declared-scope stubs or missing flags (P17), not bugs in this
-      # job. G10 needs bench/harness/docker_cold_start.py, which does not exist yet.
+      # QA-acceptance session, 2026-08-27. Real local counts drift as gaps close -- see
+      # CONTEXT.md §6's addendum for the current, owner-confirmed per-gate breakdown
+      # rather than a snapshot here that will go stale (D-67 already corrected one such
+      # snapshot once: an earlier version of this comment miscounted its own figure).
+      # G1, G4, G6, G7, G9 depend on CLI surfaces (`--assert`, `scenario run --repeat`,
+      # `compare --baseline`, `analyze --scorecard`) that are explicit, declared-scope
+      # stubs or missing flags (P17), not bugs in this job. G10 needs
+      # bench/harness/docker_cold_start.py, which does not exist yet.
       # Flip continue-on-error to false gate-by-gate as each underlying gap closes --
       # flipping it wholesale before then would just make every unrelated PR red for a
       # reason no single commit can fix, which defeats the point of a gate. This is an

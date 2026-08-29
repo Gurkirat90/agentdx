@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -37,7 +38,12 @@ RESULTS_DIR = REPO_ROOT / "tests" / "acceptance" / ".results"
 
 
 def _run_gate(
-    gate_id: str, command: Sequence[str], *, timeout_s: float = 300, cwd: Path = REPO_ROOT
+    gate_id: str,
+    command: Sequence[str],
+    *,
+    timeout_s: float = 300,
+    cwd: Path = REPO_ROOT,
+    min_pytest_passed: int | None = None,
 ) -> None:
     """Run `command` from the repo root and assert it exits 0.
 
@@ -47,8 +53,38 @@ def _run_gate(
     table reflects a real attempt, not a silent skip. Never suppresses or reinterprets a
     non-zero exit; a stub, a missing subcommand and a deadlock all show up as the same
     honest FAIL a human would see running the command by hand.
+
+    `min_pytest_passed`, when given (G2/G3 — PRD §44.3's two never-waived gates — pass
+    this), appends `--junit-xml=<results_dir>/<gate_id>-junit.xml` to `command` and reads
+    the resulting report's `<testsuite tests=".." failures=".." errors=".." skipped="..">`
+    attributes to require at least `min_pytest_passed` real passes. This closes a real gap
+    found by independent review 2026-08-29: a subprocess that exits 0 because every test
+    inside it was silently skipped (a broken fixture, an environment guard, anything short
+    of zero tests collected — which is the only all-skip case pytest itself treats as
+    non-zero, exit 5) would otherwise report this gate PASS with zero real assertions
+    having run. An exit code alone cannot distinguish "the property held" from "nothing was
+    actually checked."
+
+    **Why JUnit XML and not the terminal summary text (corrected 2026-08-29, same day as
+    the first version, D-71):** the first version of this parameter regex-matched pytest's
+    human-readable `"N passed"` summary line out of captured stdout. Verified live against
+    this project's own `tests/false_positives/` (real Python 3.12, real pytest 8.4.2, repo
+    owner's machine): the subprocess exited 0, all 13 dots printed clean (`.............`
+    `[100%]`, no `F`, no `s`), yet the captured stdout ended right there — no "N passed"
+    line at all, confirmed by reading the raw `.results/G2.json` this function itself
+    wrote, not by re-reading pytest's own truncated failure display. The cause was not
+    root-caused (no `console_output_style` override in `pyproject.toml`; likely a
+    conftest-level terminal-reporter customisation somewhere under `tests/`) — rather than
+    guess a second regex, this switches to `--junit-xml`, a structured report pytest
+    generates independently of whatever silences its terminal summary text.
     """
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    junit_path: Path | None = None
+    if min_pytest_passed is not None:
+        junit_path = RESULTS_DIR / f"{gate_id}-junit.xml"
+        junit_path.unlink(missing_ok=True)  # stale file from a prior run must not be read as new
+        command = [*command, f"--junit-xml={junit_path}"]
+
     binary = command[0]
     if shutil.which(binary) is None and not (cwd / binary).exists():
         result = {
@@ -88,8 +124,44 @@ def _run_gate(
         stderr_tail = proc.stderr[-4000:]
     except subprocess.TimeoutExpired as exc:
         returncode = None
-        stdout_tail = (exc.stdout or b"").decode(errors="replace")[-4000:] if isinstance(exc.stdout, bytes) else str(exc.stdout or "")[-4000:]
+        stdout_tail = (
+            (exc.stdout or b"").decode(errors="replace")[-4000:]
+            if isinstance(exc.stdout, bytes)
+            else str(exc.stdout or "")[-4000:]
+        )
         stderr_tail = f"TIMEOUT after {timeout_s}s"
+
+    passed_count: int | None = None
+    junit_parse_error: str | None = None
+    if min_pytest_passed is not None:
+        assert junit_path is not None  # set together, above
+        if not junit_path.exists():
+            # The binary crashed, was killed, or never got far enough to write a report --
+            # 0 is the safe, honest reading: "nothing proven to have passed," not a parse
+            # error to shrug off or treat as inconclusive.
+            passed_count = 0
+            junit_parse_error = f"{junit_path.name} was not written by the subprocess"
+        else:
+            try:
+                # Suppression justified below: junit_path is written by the pytest
+                # subprocess this same function just launched (a trusted local tool we
+                # invoked), not attacker-supplied input -- the XXE/entity-expansion risk
+                # stdlib `xml.etree` carries for untrusted data does not apply here.
+                root = ET.parse(junit_path).getroot()  # noqa: S314
+                # pytest emits either <testsuite> at the root or <testsuites><testsuite>.
+                suite = root if root.tag == "testsuite" else root.find("testsuite")
+                if suite is None:
+                    passed_count = 0
+                    junit_parse_error = f"no <testsuite> element in {junit_path.name}"
+                else:
+                    total = int(suite.get("tests", "0"))
+                    failures = int(suite.get("failures", "0"))
+                    errors = int(suite.get("errors", "0"))
+                    skipped = int(suite.get("skipped", "0"))
+                    passed_count = total - failures - errors - skipped
+            except ET.ParseError as exc:
+                passed_count = 0
+                junit_parse_error = f"{junit_path.name} failed to parse: {exc}"
 
     result = {
         "gate": gate_id,
@@ -98,6 +170,8 @@ def _run_gate(
         "returncode": returncode,
         "stdout_tail": stdout_tail,
         "stderr_tail": stderr_tail,
+        "pytest_passed_count": passed_count,
+        "pytest_junit_parse_error": junit_parse_error,
     }
     (RESULTS_DIR / f"{gate_id}.json").write_text(json.dumps(result, indent=2))
 
@@ -105,6 +179,15 @@ def _run_gate(
         f"{gate_id}: '{' '.join(command)}' exited {returncode}, not 0.\n"
         f"--- stderr tail ---\n{stderr_tail}\n--- stdout tail ---\n{stdout_tail}"
     )
+    if min_pytest_passed is not None:
+        assert passed_count is not None and passed_count >= min_pytest_passed, (
+            f"{gate_id}: '{' '.join(command)}' exited 0, but only {passed_count} pytest "
+            f"test(s) actually passed per {junit_path}'s <testsuite> counts (expected "
+            f">= {min_pytest_passed}). A gate that exits 0 with nothing real behind it "
+            f"(e.g. every test silently skipped) is a false PASS, not a real one."
+            + (f"\n--- junit parse note ---\n{junit_parse_error}" if junit_parse_error else "")
+            + f"\n--- stdout tail ---\n{stdout_tail}"
+        )
 
 
 @pytest.mark.acceptance
@@ -131,9 +214,11 @@ def test_g2_zero_false_positives_on_healthy_fixture() -> None:
 
     Never waived (PRD §44.3 item 1, CONTEXT.md §6). `tests/false_positives/` is the
     mandatory §33.9 suite; no skip markers, no xfail, per AGENTS.md and the suite's own
-    module docstrings.
+    module docstrings. `min_pytest_passed=1` (added 2026-08-29, see `_run_gate`'s own
+    docstring) additionally requires at least one real pytest pass, so a silently-all-
+    skipped run cannot report this never-waived gate PASS on exit code alone.
     """
-    _run_gate("G2", ["pytest", "tests/false_positives/", "-q"])
+    _run_gate("G2", ["pytest", "tests/false_positives/", "-q"], min_pytest_passed=1)
 
 
 @pytest.mark.acceptance
@@ -146,9 +231,12 @@ def test_g3_deterministic_replay_100_of_100() -> None:
     no system-wide Python >=3.11, so the child hits `ModuleNotFoundError: No module named
     'tomllib'` before it can even attempt the replay — an environment artifact confirmed
     by inspecting the captured subprocess stderr, not a product defect. Expected to pass
-    in the real CI job, which runs Python 3.12 project-wide.
+    in the real CI job, which runs Python 3.12 project-wide. `min_pytest_passed=1` (added
+    2026-08-29, see `_run_gate`'s own docstring) additionally requires at least one real
+    pytest pass, so a silently-all-skipped run cannot report this never-waived gate PASS
+    on exit code alone.
     """
-    _run_gate("G3", ["pytest", "tests/determinism/test_replay_equality.py"])
+    _run_gate("G3", ["pytest", "tests/determinism/test_replay_equality.py"], min_pytest_passed=1)
 
 
 @pytest.mark.acceptance

@@ -20,8 +20,11 @@ non-zero exit) would be exactly the kind of test §7 of the owning prompt exists
   as a CLI surface; `scenario`'s real subcommands are `validate`/`list`/`expand`/`new` (P17).
 - G6, G7 — `agentdx compare` and `agentdx analyze` are explicit P17 stubs (exit 2,
   "not yet implemented"), correctly out of P17's declared scope, not silently no-op'd.
-- G9 — `just demo-offline` calls `agentdx run fixtures/...` directly, so it inherits G1's
-  `sdk/`-spawn deadlock the moment a real (non-golden-log) run is attempted.
+- G9 — `just demo-offline` fails at `exit 7, "no scenario files found under fixtures/
+  code_pipeline"`, a fixture-resolution gap reached *before* G1's `sdk/`-spawn deadlock is
+  ever hit. (Corrected 2026-08-27, D-67: this package's first guess — that G9 simply
+  inherits G1's deadlock — was wrong and left stale here until this repair pass synced it
+  with `test_gates.py`'s own already-corrected docstring.)
 - G10 — `bench/harness/docker_cold_start.py`, the script `just bench-docker-cold` calls,
   does not exist yet. No Docker build has been attempted by this prompt (out of scope: no
   new features).
