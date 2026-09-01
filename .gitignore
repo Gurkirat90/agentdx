@@ -24,9 +24,14 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/.vite/
-frontend/test-results/          # Playwright's own run artifacts (traces, screenshots) -- G8 output, never a source of truth
+# Playwright's own run artifacts (traces, screenshots) -- G8 output, never a source of truth.
+# NB: git does NOT support trailing comments on a pattern line -- the whole line, spaces and
+# all, is the pattern. Both entries below carried one from 2026-08-27 (commit bde03c9) until
+# 2026-08-29, so neither directory was ever actually ignored despite that commit saying so.
+frontend/test-results/
 frontend/playwright-report/
-src/agentdx/api/static/          # built frontend, copied in at package time (PRD §39.4)
+# built frontend, copied in at package time (PRD §39.4)
+src/agentdx/api/static/
 
 # AgentDX runtime data (PRD §39.1) — never committed
 .agentdx-data/

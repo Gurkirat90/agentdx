@@ -102,8 +102,13 @@ def _write_scenario_fixture(scenario_path: str, out_name: str) -> None:
         "content_hash": None,
         "resolved": resolved,
     }
-    (OUT_DIR / out_name).write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n")
-    sys.stdout.write(f"{out_name}: scenario {scenario_id!r}, {len(resolved.get('faults', []))} declared fault(s)\n")
+    (OUT_DIR / out_name).write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
+    )
+    sys.stdout.write(
+        f"{out_name}: scenario {scenario_id!r}, "
+        f"{len(resolved.get('faults', []))} declared fault(s)\n"
+    )
 
 
 def _seeded_store(fixture: str, directory: Path) -> tuple[Store, list]:
@@ -119,8 +124,11 @@ def _seeded_store(fixture: str, directory: Path) -> tuple[Store, list]:
 
 
 def _leaf_spans_by_agent(waterfall) -> dict[str, list[tuple[int, int, str]]]:  # noqa: ANN001
-    """`{agent_id: [(seq_start, seq_end, span_id), ...]}` for every span `get_waterfall` actually
-    renders, in seq order — the real, visible span set `_nearest_leaf_span` resolves against."""
+    """Return every waterfall-rendered span, grouped by agent and ordered by seq.
+
+    `{agent_id: [(seq_start, seq_end, span_id), ...]}` for every span `get_waterfall` actually
+    renders — the real, visible span set `_nearest_leaf_span` resolves against.
+    """
     out: dict[str, list[tuple[int, int, str]]] = {}
     for lane in waterfall.lanes:
         out[lane.agent] = sorted(
@@ -132,10 +140,13 @@ def _leaf_spans_by_agent(waterfall) -> dict[str, list[tuple[int, int, str]]]:  #
 def _nearest_leaf_span(
     leaf_spans_by_agent: dict[str, list[tuple[int, int, str]]], agent_id: str | None, seq: int
 ) -> str | None:
-    """The closest waterfall-rendered span for one evidence `seq` (see this module's docstring
-    for why `event.span_id` itself is not always one of these). Containing range wins outright;
-    otherwise nearest by seq distance, ties broken toward the *preceding* span (candidates are
-    seq-ordered, so a strict `<` comparison naturally keeps the first/earliest on a tie)."""
+    """Return the closest waterfall-rendered span for one evidence `seq`.
+
+    See this module's docstring for why `event.span_id` itself is not always one of these.
+    Containing range wins outright; otherwise nearest by seq distance, ties broken toward the
+    *preceding* span (candidates are seq-ordered, so a strict `<` comparison naturally keeps
+    the first/earliest on a tie).
+    """
     if agent_id is None:
         return None
     candidates = leaf_spans_by_agent.get(agent_id, [])
@@ -208,6 +219,7 @@ def _findings_for(
 
 
 def main() -> int:
+    """Regenerate every committed frontend fixture from the golden logs. Returns an exit code."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
@@ -237,18 +249,19 @@ def main() -> int:
                     "findings": json.loads(findings.model_dump_json()),
                     "state": json.loads(state.model_dump_json()),
                 }
-                (OUT_DIR / f"{fixture}.waterfall.json").write_text(
-                    json.dumps({"run_id": run_id, "fixture": fixture, "waterfall": payload["waterfall"]}, indent=2, sort_keys=True) + "\n"
-                )
-                (OUT_DIR / f"{fixture}.graph.json").write_text(
-                    json.dumps({"run_id": run_id, "fixture": fixture, "graph": payload["graph"]}, indent=2, sort_keys=True) + "\n"
-                )
-                (OUT_DIR / f"{fixture}.findings.json").write_text(
-                    json.dumps({"run_id": run_id, "fixture": fixture, "findings": payload["findings"]}, indent=2, sort_keys=True) + "\n"
-                )
-                (OUT_DIR / f"{fixture}.state.json").write_text(
-                    json.dumps({"run_id": run_id, "fixture": fixture, "state": payload["state"]}, indent=2, sort_keys=True) + "\n"
-                )
+                for section in ("waterfall", "graph", "findings", "state"):
+                    (OUT_DIR / f"{fixture}.{section}.json").write_text(
+                        json.dumps(
+                            {
+                                "run_id": run_id,
+                                "fixture": fixture,
+                                section: payload[section],
+                            },
+                            indent=2,
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
                 sys.stdout.write(
                     f"{fixture}: {len(graph.nodes)} nodes, {len(graph.edges)} edges, "
                     f"{len(findings.findings)} findings, {len(state.keys)} state keys "

@@ -84,6 +84,7 @@ def _seed_running_run(
         store.close()
     return run_id
 
+
 _VALID_SCENARIO = """\
 version: 1
 scenario: kill_reviewer

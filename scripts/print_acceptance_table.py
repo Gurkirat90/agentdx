@@ -27,7 +27,9 @@ def main() -> int:
     for gate_id in GATE_IDS:
         result_path = RESULTS_DIR / f"{gate_id}.json"
         if not result_path.exists():
-            rows.append((gate_id, "NO RESULT", "just acceptance was not run, or crashed before this gate"))
+            rows.append(
+                (gate_id, "NO RESULT", "just acceptance was not run, or crashed before this gate")
+            )
             all_pass = False
             continue
         data = json.loads(result_path.read_text())
