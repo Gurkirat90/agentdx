@@ -96,12 +96,51 @@ def is_fixture_name(candidate: str, *, root: Path | None = None) -> str | None:
     Accepts a bare name (`code_pipeline`) or a path to the fixture directory
     (`fixtures/code_pipeline`, `./fixtures/code_pipeline/`) — the exact two forms PRD §38.1's
     own worked example and §37.1's own examples both use.
+
+    Guarantees, each of which a previous version of this function did not hold (D-77):
+
+    * **A path is a fixture only if it IS the fixture directory**, not if it merely shares a
+      basename with one. The earlier `Path(stripped).name` reduction discarded the parent
+      path entirely, so `my_scenarios/code_pipeline` — an ordinary directory of scenario
+      files — resolved to the shipped `code_pipeline` fixture and ran the wrong graph with
+      no warning. §37.1 lists "a directory of scenarios" and "a fixture name" as two of the
+      four `TARGET` shapes; collapsing one into the other is not a reading of that sentence.
+    * **A path-shaped candidate is resolved against ITS OWN checkout, not the caller's cwd.**
+      `find_repo_root()` walks up from the working directory, which answers "which checkout
+      am I standing in" — a different question from "which checkout does this target belong
+      to". Running `agentdx run /elsewhere/agentdx/fixtures/code_pipeline` from outside any
+      checkout previously found no root, declined the fixture, and reproduced D-77 exactly.
+
+    Bare-vs-path is decided on the **raw string**, not on `Path.parts`, because `pathlib`
+    normalises `./code_pipeline` to `code_pipeline` and would otherwise route an explicitly
+    local path into the bare-name branch.
+
+    Precedence, where PRD §37.1 is silent (see D-77): a bare `code_pipeline` means the
+    fixture, even when a directory of that name sits in the working directory; write
+    `./code_pipeline` to mean the local directory. A bare name carries no path information,
+    so it can only ever be resolved relative to `root` or the cwd.
     """
-    repo_root = root or find_repo_root()
+    stripped = candidate.rstrip("/")
+    if not stripped:
+        return None
+    if "/" not in stripped:
+        repo_root = root or find_repo_root()
+        if repo_root is None:
+            return None
+        if (repo_root / "fixtures" / stripped / "graph.py").is_file():
+            return stripped
+        return None
+    resolved = Path(stripped).resolve()
+    repo_root = root or find_repo_root(resolved.parent) or find_repo_root()
     if repo_root is None:
         return None
-    stripped = candidate.rstrip("/")
-    name = Path(stripped).name
+    try:
+        relative = resolved.relative_to(repo_root.resolve())
+    except ValueError:
+        return None
+    if len(relative.parts) != 2 or relative.parts[0] != "fixtures":
+        return None
+    name = relative.parts[1]
     if (repo_root / "fixtures" / name / "graph.py").is_file():
         return name
     return None

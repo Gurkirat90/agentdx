@@ -50,7 +50,12 @@ from agentdx.cli._scenario_io import (
     discover_scenarios,
     load_and_validate,
 )
-from agentdx.cli._target import TargetError, find_repo_root, resolve_target
+from agentdx.cli._target import (
+    TargetError,
+    find_repo_root,
+    is_fixture_name,
+    resolve_target,
+)
 from agentdx.cli.host import CliRunHost, build_cache, build_cache_hook, build_fault_hooks
 from agentdx.config import AgentDXConfig
 from agentdx.events.schema import DraftEvent, Event
@@ -89,10 +94,29 @@ class _RunOutcome:
 
 
 def _is_scenario_path(target: str) -> bool:
+    """Return whether `target` names a scenario file or a directory of scenario files.
+
+    Guarantees: a directory that is a **known fixture** is never claimed here, so the caller
+    falls through to `resolve_target`'s fixture branch. `is_fixture_name` is the single
+    authority on what a fixture is (a `fixtures/<name>/graph.py` that exists) — this
+    function does not re-derive that test, per CONTEXT.md §4's "never write a second copy of
+    a rule" discipline.
+
+    Why the fixture check is here and not only in `resolve_target`: this predicate decides
+    which of two branches `_execute` takes, and it ran first. Because `path.is_dir()` alone
+    claimed *any* existing directory, `agentdx run fixtures/code_pipeline` — PRD §38.1's own
+    literal quickstart command — was routed to `discover_scenarios`, found no `*.yaml`, and
+    exited 7 (`E-TARGET` was never consulted; `resolve_target` was never reached). That is
+    the confirmed cause of gate G9's `exit 7, "no scenario files found under
+    fixtures/code_pipeline"` and of the identical exit 7 from `docker-compose.yml`'s `seed`
+    service, observed 2026-08-29 on real hardware. See D-77.
+    """
     path = Path(target)
     if path.suffix in (".yaml", ".yml") and path.is_file():
         return True
-    return path.is_dir()
+    if not path.is_dir():
+        return False
+    return is_fixture_name(target) is None
 
 
 def _resolve_task_text(task_field: str, *, scenario_dir: Path) -> str:
