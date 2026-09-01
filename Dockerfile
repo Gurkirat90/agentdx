@@ -22,12 +22,18 @@
 # Three known gaps the image cannot paper over, all confirmed by that run:
 #
 #   1. `agentdx run <fixture>` cannot complete a run. Nothing in `sdk/` ever calls
-#      `runtime.scheduler.Scheduler.spawn()` (D-62; confirmed independently this session by
-#      `grep -rn '\.spawn(' src/agentdx/`, which returns zero hits against a `spawn` defined
-#      at `runtime/scheduler.py:752`). LangGraph's parallel fan-out therefore deadlocks the
-#      single-task scheduler loop. The compose command below will exit 5, not 0, and the run
-#      list will be EMPTY. Gate G10 asks for a *populated* run list; this image cannot
-#      produce one, and no amount of packaging work changes that.
+#      `runtime.scheduler.Scheduler.spawn()` (D-62; confirmed by `grep -rn '\.spawn('
+#      src/agentdx/`, zero hits against a `spawn` defined at `runtime/scheduler.py:752`).
+#      The compose command below exits 5, not 0, and the run list is EMPTY. Gate G10 asks
+#      for a *populated* run list; this image cannot produce one, and no amount of packaging
+#      work changes that.
+#      CORRECTION: an earlier revision of this header said "LangGraph's parallel fan-out
+#      therefore deadlocks the single-task scheduler loop" as fact. `d62-design.md` §3
+#      downgrades that to a hypothesis: `_resume_task` grants one event-loop tick per
+#      resumption and recognises only scheduler-created Futures as suspension, so any await
+#      on real async machinery needing more than one tick deadlocks regardless of
+#      concurrency. The observed empty `wait_reason` is consistent with that. Fan-out may
+#      well be incidental. One test settles it; it has not been run.
 #
 #   2. `agentdx ui` serves the API only. `api/app.py` mounts `api_router` and `ws.router`
 #      and nothing else — there is no `StaticFiles` mount and no `src/agentdx/api/static/`
@@ -53,6 +59,14 @@ WORKDIR /build/frontend
 
 # Dependencies first, so a source-only edit does not re-resolve the tree. `npm ci` is the
 # locked install — the same command `just sync-frontend` runs.
+#
+# THIS STEP DEPENDS ON `.dockerignore` EXCLUDING `**/node_modules/`. `COPY frontend/ ./`
+# below runs *after* this install and would otherwise overwrite it with the host's macOS
+# node_modules. That was live until 2026-09-01 and passed only by luck: the host tree
+# carries all 23 @esbuild platform variants, linux-arm64 among them, so esbuild still
+# resolved a working binary — while this `npm ci`'s entire output was discarded and the
+# image shipped every platform's binaries plus all devDependencies. Delete `.dockerignore`
+# and that returns silently.
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 

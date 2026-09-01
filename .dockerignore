@@ -1,0 +1,98 @@
+# Build context exclusions — load-bearing for gate G10, not housekeeping.
+#
+# Docker transfers the ENTIRE build context to the daemon before the first layer runs. This
+# repository is ~1.2 GB on disk and the Dockerfile needs about 4 MB of it. Without this file
+# every `docker build` shipped ~1.15 GB of caches, virtualenvs and deleted-file archives
+# across the Docker Desktop virtualization boundary before anything compiled — a direct,
+# measurable share of G10's 181.092 s against its 180 s threshold.
+#
+# It also fixed a correctness bug that had been passing by luck. `COPY frontend/ ./` runs
+# AFTER `RUN npm ci`, so without `frontend/node_modules` excluded here, the host's macOS
+# node_modules overwrote the container's freshly installed Linux one. The build succeeded
+# only because the host tree happens to carry all 23 @esbuild platform variants, including
+# linux-arm64, so esbuild still resolved a usable binary at runtime. `npm ci`'s entire
+# output was being discarded, and the image carried every platform's binaries plus all
+# devDependencies. **If you delete this file, that bug comes back silently.**
+
+# ---------------------------------------------------------------------------------------
+# Virtualenvs and dependency trees — rebuilt inside the image, never copied in
+# ---------------------------------------------------------------------------------------
+.venv/
+.venv-review/
+**/node_modules/
+**/__pycache__/
+*.py[cod]
+
+# ---------------------------------------------------------------------------------------
+# Tooling caches — pure waste in a build context
+# ---------------------------------------------------------------------------------------
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+.hypothesis/
+.benchmarks/
+htmlcov/
+.coverage
+
+# ---------------------------------------------------------------------------------------
+# Working directories and archives that are not the product
+# ---------------------------------------------------------------------------------------
+_to_delete/
+_incoming/
+ci-out/
+gen/
+*.tar.gz
+
+# ---------------------------------------------------------------------------------------
+# VCS and CI metadata. The image never reads git history; `agentdx version` reads
+# pyproject.toml, not `git describe`.
+# ---------------------------------------------------------------------------------------
+.git/
+.github/
+.gitignore
+.pre-commit-config.yaml
+
+# ---------------------------------------------------------------------------------------
+# Runtime data — a developer's local runs must never be baked into an image
+# ---------------------------------------------------------------------------------------
+.agentdx-data/
+*.db
+*.db-wal
+*.db-shm
+
+# ---------------------------------------------------------------------------------------
+# Frontend build output and test artifacts. `vite build` regenerates dist/ inside stage 1;
+# copying a host-built one in would ship whatever was last built locally.
+# ---------------------------------------------------------------------------------------
+frontend/dist/
+frontend/.vite/
+frontend/test-results/
+frontend/playwright-report/
+src/agentdx/api/static/
+
+# ---------------------------------------------------------------------------------------
+# Tests and benchmarks. The image runs the demo; it does not run the suite.
+#
+# `docs/` is deliberately NOT excluded. The Dockerfile copies `docs/openapi.json`, and
+# excluding the directory would mean relying on a `!docs/openapi.json` re-inclusion — which
+# works, but is the kind of ordering subtlety that breaks silently when someone reorders
+# this file. docs/ is roughly a megabyte against the ~1.15 GB this file saves; buying
+# robustness with that is the right trade.
+# ---------------------------------------------------------------------------------------
+tests/
+bench/
+
+# ---------------------------------------------------------------------------------------
+# Session scratch — scripts and reports produced by build sessions, not by the product
+# ---------------------------------------------------------------------------------------
+*-plan.md
+*-design.md
+op2-*.md
+op3-*.md
+commit-*.sh
+verify-*.sh
+CONTEXT.md
+AGENTS.md
+CHANGELOG.md
+CONTRIBUTING.md
