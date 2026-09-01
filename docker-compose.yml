@@ -1,0 +1,95 @@
+# AgentDX — the one-command demo (PRD §39.2).
+#
+#   docker compose up
+#
+# Gate G10 (PRD §44.1): reaches a healthy /api/health and a POPULATED run list, cold cache,
+# arm64, inside the threshold §44.1 names. `just bench-docker-cold` is what measures it.
+#
+# ---------------------------------------------------------------------------------------
+# G10 CANNOT PASS AGAINST THIS FILE TODAY, AND THIS FILE IS NOT WHY
+# ---------------------------------------------------------------------------------------
+# `agentdx run <fixture>` cannot complete a run: nothing in `sdk/` ever calls
+# `runtime.scheduler.Scheduler.spawn()` (D-62), so LangGraph's parallel fan-out deadlocks
+# the scheduler's single-task loop and the CLI exits 5. The `seed` service below will
+# therefore fail, `agentdx` will come up healthy with an EMPTY run list, and G10's
+# "populated run list" half will not be met.
+#
+# That is stated here rather than worked around. Three tempting workarounds were all
+# rejected: dropping to one fixture (the mission's own STOP CONDITION), making `seed`
+# non-blocking so `up` looks clean (hides the failure), and pre-baking a run database into
+# the image (a demo that shows a recorded result instead of running one is a lie about what
+# the tool does). See CONTEXT.md §6 and this session's NOT DONE / RISKS.
+#
+# ---------------------------------------------------------------------------------------
+# Deviations from PRD §39.2's literal block, each deliberate
+# ---------------------------------------------------------------------------------------
+#  * Environment variable names. §39.2 sets `AGENTDX_MODE` and `AGENTDX_DATA_DIR`. Neither
+#    exists: `config.py`'s contract is `AGENTDX_<SECTION>_<KEY>` (ENV_PREFIX +
+#    `_read_env_section`), so both of §39.2's names are silently ignored — they do not even
+#    raise, because the unknown-key error only fires for a name that matches a real section
+#    prefix. The working names are used below. (`just demo-offline` carries the same inert
+#    `AGENTDX_MODE=replay`; harmless there only because `replay` is already the default.)
+#  * `seed` is split out of the `agentdx` service. §39.2 chains the three runs and `ui` in
+#    one `sh -c`, so every failure arrives as one opaque non-zero exit from a single
+#    container and a G10 harness cannot tell "a fixture failed" from "the server is broken".
+#    Split into two services, the seeding step has its own container with its own exit code
+#    and its own logs, which `docker compose ps -a` reports separately — that is what makes
+#    the gate measurable rather than merely assertable.
+#    The server still does NOT start when seeding fails (`service_completed_successfully`).
+#    That is deliberate: a server that comes up healthy with an empty run list is a demo
+#    that looks fine and shows nothing, which is the failure mode G10's "populated run list"
+#    clause exists to catch. Failing loudly at the seed step is the honest signal.
+#  * `pull_policy: build` and an explicit `image:` name, so `just bench-docker-cold` can
+#    prune exactly this image for a genuine cold-cache measurement.
+
+services:
+  # Seeds the three reference fixtures, then exits. The server waits on this container
+  # completing successfully, so a healthy /api/health means all three fixture runs actually
+  # succeeded — never that the server merely started. `set -e` keeps a mid-list failure from
+  # being swallowed by the two runs after it.
+  seed:
+    build: .
+    image: agentdx:local
+    pull_policy: build
+    volumes: ["./.agentdx-data:/data"]
+    environment:
+      AGENTDX_RUN_MODE: replay # offline by default (I7) — replay-mode miss is a hard error
+      AGENTDX_RUN_DATA_DIR: /data
+      AGENTDX_STORE_DATA_DIR: /data
+      PYTHONHASHSEED: "0"
+    # No `network_mode: none` here: G9 is the gate that proves the demo runs with the
+    # network disabled, and it does so via `just demo-offline --network none`. Pinning it in
+    # compose would make the two gates measure the same thing and neither measure it well.
+    # No API key is passed in, which is the property that actually matters (I7, §38.2).
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        agentdx run fixtures/code_pipeline
+        agentdx run fixtures/support_triage
+        agentdx run fixtures/research_fanout
+    restart: "no"
+
+  agentdx:
+    build: .
+    image: agentdx:local
+    pull_policy: build
+    ports: ["8420:8420"]
+    volumes: ["./.agentdx-data:/data"]
+    environment:
+      AGENTDX_RUN_MODE: replay
+      AGENTDX_RUN_DATA_DIR: /data
+      AGENTDX_STORE_DATA_DIR: /data
+      PYTHONHASHSEED: "0"
+    # `--host 0.0.0.0` is safe here because Compose owns the port binding; PRD §31.10's
+    # no-auth warning applies to bare-metal use, and the CLI prints it either way.
+    command: ["agentdx", "ui", "--host", "0.0.0.0"]
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8420/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

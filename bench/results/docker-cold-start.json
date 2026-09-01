@@ -1,0 +1,34 @@
+{
+  "benchmark": "docker-cold-start",
+  "cold_cache": true,
+  "criterion": "PRD \u00a744.1 G10: `docker compose up` reaches a healthy /api/health AND a populated run list, cold cache, arm64, under the threshold.",
+  "detail": "`docker compose up -d --build` exited 1 after 181.092s. Exit 5: an internal error. This is the exit code D-62's scheduler deadlock surfaces as \u2014 nothing in sdk/ calls Scheduler.spawn(), so LangGraph's parallel fan-out has no runnable task and the cooperative loop stalls. stderr tail:  Container agentdx-g10-seed-1 Starting  |  Container agentdx-g10-seed-1 Started  |  Container agentdx-g10-seed-1 Waiting  |  Container agentdx-g10-seed-1 Error service \"seed\" didn't complete successfully: exit 5 | service \"seed\" didn't complete successfully: exit 5",
+  "environment": {
+    "arch_conformant": true,
+    "implementation": "CPython",
+    "machine": "arm64",
+    "python": "3.12.2",
+    "system": "Darwin"
+  },
+  "failed_step": "compose_up",
+  "gate": "G10",
+  "gate_status": "Pass/fail against the threshold is the claim. The exact second counts are real wall-clock measurements of a container build and will vary with machine, disk, and registry latency; never quote a fixed digit from this file as a permanent fact in CONTEXT.md or the README \u2014 cite the file. Same discipline as D-68.",
+  "healthy": false,
+  "is_gate_conformant_run": true,
+  "log_tail": [
+    "seed-1  | \u2717 DeadlockError('[E-SCHED-003] deadlock: no task is runnable and none is blocked on a timer. Wait reasons: {t_r_50f3b6_root_0: } (docs/determinism-guarantees.md#e-sched-003)')",
+    "seed-1  | code_pipeline: failed",
+    "seed-1  | Bounded search: absence of findings is not proof of absence."
+  ],
+  "met": false,
+  "method": "Containers, volumes, the locally built image and the whole builder cache were removed, and the bind-mount data directory deleted, before the clock started; that teardown is excluded from the timed window. The timer starts at `docker compose up -d --build` and stops the first poll at which /api/health answers 200 AND /api/runs returns a non-empty runs array. Both halves are required \u2014 health alone is not the gate.",
+  "populated": false,
+  "run_count": 0,
+  "seed_exit_code": 5,
+  "threshold_s": 180.0,
+  "timings_wall_s": {
+    "build_and_up_wall_s": 181.092,
+    "healthy_at_wall_s": null,
+    "populated_at_wall_s": null
+  }
+}
