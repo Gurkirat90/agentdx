@@ -177,16 +177,17 @@ Five tolerances, read from `cli.ci.REGRESSION_TOLERANCES` (not hardcoded per cal
 
 | Metric | Default tolerance | Fails when |
 |---|---|---|
-| `achieved_speedup` | −5% relative | New value below baseline − 5% |
+| `achieved_speedup` | 5 percent, relative, downward | New value below baseline minus 5 percent |
 | `resilience_score` | −3 absolute | New score below baseline − 3 |
 | `coordination_score` | −5 absolute | Below baseline − 5 |
-| `token_cost_multiplier` | +10% relative | Above baseline + 10% |
+| `token_cost_multiplier` | 10 percent, relative, upward | Above baseline plus 10 percent |
 | `findings[high+]` | 0 new | Any new high/critical finding |
 
 Baselines are refreshed only by an explicit `agentdx baseline update` (not yet implemented —
-see NOT DONE) — never automatically. `tests/integration/cli/test_ci_mode.py` seeds a 25%
-speedup regression against a round-tripped baseline file and asserts `check_regression`
-catches it (and a second test asserts a 1.5% drop, within tolerance, does not).
+see NOT DONE) — never automatically. `tests/integration/cli/test_ci_mode.py` seeds a
+25-percent speedup regression against a round-tripped baseline file and asserts
+`check_regression` catches it (and a second test asserts a 1.5-percent drop, within
+tolerance, does not).
 
 ## The shipped GitHub Actions workflow (PRD §22.5, `.github/workflows/agentdx.yml`)
 

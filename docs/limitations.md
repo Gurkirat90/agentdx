@@ -102,9 +102,10 @@ limitations found while writing it would defeat its own purpose:
   missing flag first.
 - **`analysis/overhead.py`'s decomposition invariant test cannot distinguish a correctly
   computed zero residual from a residual forced to zero by a bug**, on the current three
-  golden fixtures specifically — because the real residual is already exactly 0ms on all
-  three (`code_pipeline`, `research_fanout`, `support_triage`; confirmed by direct
-  measurement, this session). A mutation that added a genuine +100ms discrepancy was caught
+  golden fixtures specifically — because the real residual is already exactly zero
+  milliseconds on all three (`code_pipeline`, `research_fanout`, `support_triage`; confirmed
+  by direct measurement, this session). A mutation that added a genuine
+  hundred-millisecond discrepancy was caught
   immediately (4/4 tests failed, via the function's own `E-OVHD-001` self-check) — so the
   invariant check is not broken in general, but nothing in the current suite exercises the
   "residual should be nonzero and we report it correctly" branch. A fourth, synthetic fixture
