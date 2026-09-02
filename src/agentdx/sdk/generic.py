@@ -40,7 +40,7 @@ import inspect
 import re
 import warnings
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -182,6 +182,18 @@ class ValueRepresentationError(SdkError):
     code: ClassVar[str] = "E-INSTR-008"
 
 
+class SchedulerTaskError(SdkError):
+    """A `Scheduler.join` call named a task id the scheduler never registered.
+
+    Carries `E-INSTR-009`. Deliberately in `sdk/`, not `runtime/`'s own `SchedulerError`:
+    `sdk.generic.Scheduler` is a Protocol any implementation may satisfy (`ImmediateScheduler`
+    included), and this module must not depend on `runtime.scheduler`'s concrete error
+    hierarchy to report a misuse of its own abstraction (ADR-017, D-62 Option B).
+    """
+
+    code: ClassVar[str] = "E-INSTR-009"
+
+
 class CacheMissError(SdkError):
     """A replay-mode LLM call missed the cache (invariant I7).
 
@@ -259,14 +271,50 @@ class Recorder(Protocol):
 
 @runtime_checkable
 class Scheduler(Protocol):
-    """The cooperative scheduler's yield point (PRD §8.5 item 4, §10.2).
+    """The cooperative scheduler's interleaving surface (PRD §8.5 item 4, §10.2).
 
     The provider shim yields around every model call so that concurrency is
     scheduler-visible even in passthrough mode, where nothing is being replayed.
+
+    **`spawn`/`join` added by ADR-017 (D-62, Option B).** Before that ADR this Protocol
+    had one method (`yield_point`) and the scheduler's entire interleaving space was "before
+    and after an LLM call" — real concurrency between LangGraph nodes was invisible to it.
+    `spawn` lets `sdk/langgraph.py::run_node_async` make each instrumented node's body its
+    own scheduler task instead of one plain coroutine inside the scheduler's single root
+    task; `join` is how the Pregel-facing wrapper waits for that task's result without doing
+    so via a raw `await` the scheduler cannot see (which is D-62's own mechanism, per
+    `d62-design.md` §2-3 — an unrecognised suspension deadlocks it). `join` was not in
+    ADR-017's original two-method sketch; it was found necessary while wiring `run_node_async`
+    and is the same kind of Protocol addition, not a separate decision.
     """
 
     async def yield_point(self, reason: str) -> None:
         """Give the scheduler an opportunity to run another task."""
+        ...
+
+    def spawn(
+        self,
+        coro: Coroutine[object, object, object],
+        *,
+        agent_id: str,
+        virtual_ready_ts_ms: int = 0,
+    ) -> str:
+        """Register `coro` as a new scheduler task; return its task_id.
+
+        Registration only — does not start the task running and does not suspend the
+        caller. The task becomes eligible to run (subject to `virtual_ready_ts_ms`) the
+        next time the scheduler collects runnable tasks.
+        """
+        ...
+
+    async def join(self, task_id: str) -> object:
+        """Suspend the caller until the task named by `task_id` reaches completion.
+
+        Returns that task's result. Raises the exception it raised, if any, so a spawned
+        node body's failure surfaces at the `join` call site exactly as if it had been
+        awaited inline — spawning must not change what a node's own exception looks like
+        to its caller.
+        """
         ...
 
 
@@ -358,11 +406,49 @@ class ImmediateScheduler:
     order `asyncio` chooses and makes no determinism claim. P06's scheduler replaces it and
     is what makes I1 true; this exists so the shim's yield points are already in the code
     when it arrives, rather than being retrofitted through every call site.
+
+    **`spawn`/`join` (ADR-017).** No ordering claim to keep here either: `spawn` starts
+    `coro` running immediately as a plain `asyncio.Task`, and `join` awaits it directly.
+    This mirrors the class's existing "no ordering, just correctness" contract — a caller
+    using this default scheduler (no real `runtime.scheduler.Scheduler` installed) gets a
+    node body that still runs and still completes, with no determinism guarantee attached,
+    which is the same guarantee (none) `yield_point` already gives here.
     """
+
+    _tasks: dict[str, asyncio.Task[object]] = field(default_factory=dict)
 
     async def yield_point(self, reason: str) -> None:
         """Return without yielding. Named `reason` for parity with the real scheduler."""
         return
+
+    def spawn(
+        self,
+        coro: Coroutine[object, object, object],
+        *,
+        agent_id: str,
+        virtual_ready_ts_ms: int = 0,
+    ) -> str:
+        """Start `coro` running immediately; return a task id `join` can use.
+
+        `virtual_ready_ts_ms` is accepted for Protocol conformance and ignored — there is
+        no virtual clock without a real scheduler.
+        """
+        task_id = f"immediate:{agent_id}:{len(self._tasks)}"
+        self._tasks[task_id] = asyncio.ensure_future(coro)
+        return task_id
+
+    async def join(self, task_id: str) -> object:
+        """Await the task `spawn` started and return its result.
+
+        Raises:
+            SchedulerTaskError: `task_id` was never returned by this scheduler's `spawn`
+                (`E-INSTR-009`).
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            detail = f"join({task_id!r}) names a task ImmediateScheduler never spawned"
+            raise SchedulerTaskError(detail)
+        return await task
 
 
 @dataclass(frozen=True, slots=True)
@@ -1785,6 +1871,7 @@ __all__ = [
     "RunHost",
     "RunResult",
     "Scheduler",
+    "SchedulerTaskError",
     "SdkError",
     "Span",
     "SpanRecord",

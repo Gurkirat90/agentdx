@@ -555,6 +555,10 @@ class Scheduler:
         # asyncio glue: each yield_point suspends on a Future the scheduler resolves.
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task_futures: dict[str, asyncio.Future[None]] = {}
+        # task_id -> ids of tasks blocked in join() waiting on it (ADR-017, D-62 Option B).
+        # A join'd-on task may have several waiters; a waiter joins exactly one task at a
+        # time (join() is not re-entrant against the same caller).
+        self._joiners: dict[str, list[str]] = {}
         # Captured in run(), before asyncio.sleep is patched to virtual. _resume_task
         # uses this — never the module-level asyncio.sleep — to yield to the real event
         # loop for one tick; the module-level name is the *patched* one for the duration
@@ -653,6 +657,64 @@ class Scheduler:
         self._task_futures[task_id] = fut
         await fut
 
+    async def join(self, task_id: str) -> object:
+        """Suspend the current task until ``task_id`` reaches ``DONE``; return its result.
+
+        Added by ADR-017 (D-62, Option B) — the mechanism ``sdk/langgraph.py::run_node_async``
+        needs to wait for a spawned node-body task without doing so via a raw ``await`` the
+        scheduler cannot see, which is D-62's own deadlock condition (``d62-design.md`` §2-3:
+        the scheduler only re-examines tasks suspended on its own ``yield_point``/``sleep``
+        Futures; anything else stays ``RUNNING`` forever from its point of view).
+
+        Unlike ``yield_point`` (re-enters the runnable pool immediately) and ``sleep``
+        (resumes when virtual time reaches a deadline), a join resumes only when a
+        *specific other task* reaches ``DONE`` — mirroring how ``sleep``'s timer moves a
+        task ``BLOCKED`` → ``RUNNABLE`` (``_unblock_timers``), a join moves the caller
+        ``BLOCKED`` → ``RUNNABLE`` the moment ``task_id`` completes (see ``_drive_coro``'s
+        ``finally`` block), and the caller's own pending Future is then resolved through the
+        ordinary ``_resume_task`` path like any other runnable task — no separate resumption
+        mechanism is introduced.
+
+        Args:
+            task_id: The id ``spawn`` returned for the task to wait for.
+
+        Returns:
+            The target task's return value.
+
+        Raises:
+            SchedulerError: called from outside a scheduler-managed task, or ``task_id``
+                names a task this scheduler never registered (``E-SCHED-001``).
+            Exception: whatever the target task itself raised, re-raised here unchanged —
+                a spawned node body's failure must look identical to its caller whether the
+                body ran inline or as a separate task.
+        """
+        caller_id = _current_task_id()
+        caller = self._tasks.get(caller_id)
+        if caller is None:
+            detail = (
+                f"join({task_id!r}) called from task {caller_id!r} which is not known to "
+                f"this scheduler — was this coroutine spawned outside run()?"
+            )
+            raise SchedulerError(detail)
+        target = self._tasks.get(task_id)
+        if target is None:
+            detail = f"join({task_id!r}) names a task this scheduler never registered"
+            raise SchedulerError(detail)
+
+        if target.state is not TaskState.DONE:
+            caller.state = TaskState.BLOCKED
+            caller.wait_reason = f"join({task_id})"
+            self._joiners.setdefault(task_id, []).append(caller_id)
+
+            assert self._loop is not None  # noqa: S101
+            fut: asyncio.Future[None] = self._loop.create_future()
+            self._task_futures[caller_id] = fut
+            await fut
+
+        if target.exception is not None:
+            raise target.exception
+        return target.result
+
     # ------------------------------------------------------------------
     # Run entry point
     # ------------------------------------------------------------------
@@ -747,6 +809,9 @@ class Scheduler:
 
     # ------------------------------------------------------------------
     # Spawning tasks (called by the SDK when it creates a new agent step)
+    # Part of the sdk.generic.Scheduler protocol as of ADR-017 (D-62, Option B) — this
+    # method existed since P06 but had no caller until sdk/langgraph.py::run_node_async
+    # started using it; see `join` below for how a caller waits on what it spawns.
     # ------------------------------------------------------------------
 
     def spawn(
@@ -757,6 +822,10 @@ class Scheduler:
         virtual_ready_ts_ms: int = 0,
     ) -> str:
         """Register a new task with the scheduler.  Returns the task_id.
+
+        Registration only: does not start the coroutine running (that happens the first
+        time `_resume_task` chooses it) and does not suspend the caller — pair with `join`
+        to wait for the result.
 
         Args:
             coro: The coroutine to run.
@@ -908,13 +977,42 @@ class Scheduler:
         2. Bind the scheduler task context (``context.py``) so the task's coroutine can
            read ``current_task()`` from within a patched builtin.
         3. Resolve the task's yield Future (or start the coroutine for the first time).
-        4. Drive the asyncio event loop one step so the task runs to its next yield.
+        4. Drive the asyncio event loop so the task runs to its next yield — one tick on a
+           first dispatch; up to ``resume_drain_ticks`` on a resumption (see below).
         5. Catch a clean return or exception, mark the task done.
 
         **Stamping note:** the ``schedule_decision`` event is stamped inside
         ``_recorder.write``, which is called before we yield to the task.  Every other
         event the task emits (spans, state reads, etc.) goes through the same
         ``_recorder.write``.  This is the single stamping point.
+
+        **Why a resumption gets more real ticks than a first dispatch (ADR-017, D-62
+        Option B).** A resumed task is continuing execution this scheduler already vetted:
+        it reached this point by suspending on a Future *we* created (``yield_point``,
+        ``sleep`` or ``join``), so we know its own control flow returns to a
+        scheduler-visible checkpoint. In practice that return trip can pass through real
+        ``asyncio`` machinery neither this scheduler nor AgentDX's own instrumentation
+        creates — concretely, LangGraph's generic ``Runnable.ainvoke`` calls
+        ``run_manager.on_chain_end`` after every node, and LangChain decorates that
+        ``@shielded``: it unconditionally does
+        ``asyncio.shield(asyncio.create_task(coro))`` even with zero callback handlers
+        configured (`on_chain_end`'s own body is `if not self.handlers: return` — the
+        shield/task overhead is pure, side-effect-free unwind noise, confirmed by reading
+        `langchain_core.callbacks.manager`), needing a handful of real ticks to settle. One
+        tick (the original design) mistook that in-flight, side-effect-free work for a
+        deadlock.
+
+        This does **not** reopen the suspension a task's *first* dispatch is checked
+        against, which is exactly what D-62's own decisive experiment
+        (`test_a_suspension_needing_another_task_deadlocks`) and
+        `test_deadlock_error_names_every_stuck_task` still exercise: a task that has never
+        yet reached one of our own suspension points gets exactly one tick, same as always,
+        and a genuine hang is still reported immediately. A node's own body always runs as
+        its own freshly `spawn()`-ed task (its *first* dispatch) — so arbitrary node code
+        that awaits real, unmanaged concurrency is caught exactly as before. Only the
+        continuation that already proved it belongs to this scheduler — LangGraph's own
+        internal driving loop, resuming from one of our own Futures — gets the extra
+        drain, and only up to `SchedulerConfig.resume_drain_ticks`.
         """
         task.state = TaskState.RUNNING
 
@@ -944,13 +1042,32 @@ class Scheduler:
                 if not fut.done():
                     fut.set_result(None)
                 del self._task_futures[task.task_id]
-                # Dispatch tick: let the real event loop run the now-resolved future's
-                # continuation. Must be the *real* asyncio.sleep, captured before run()
-                # patched the module-level name to virtual — awaiting the patched name
-                # here would treat this scheduler-internal tick as task's own sleep(0).
-                await self._real_asyncio_sleep(0)
+                # Dispatch drain: let the real event loop run the now-resolved future's
+                # continuation until it settles (DONE, or a fresh scheduler-visible
+                # suspension), not just one tick — see the docstring above for why this is
+                # safe specifically for a *resumption*. Must be the *real* asyncio.sleep,
+                # captured before run() patched the module-level name to virtual — awaiting
+                # the patched name here would treat these scheduler-internal ticks as the
+                # task's own.
+                drained = 0
+                while task.state is TaskState.RUNNING:
+                    if drained >= self._config.resume_drain_ticks:
+                        detail = (
+                            f"task {task.task_id!r}, resumed from its own join/yield/sleep "
+                            f"Future, did not reach a scheduler-recognised state (DONE, or "
+                            f"a fresh suspension) within {drained} real event-loop ticks — "
+                            f"its continuation appears to be genuinely stuck on real, "
+                            f"unmanaged concurrency rather than merely unwinding through "
+                            f"non-scheduler asyncio machinery"
+                        )
+                        raise SchedulerError(detail)
+                    await self._real_asyncio_sleep(0)
+                    drained += 1
             else:
-                # First time: start the coroutine by sending None.
+                # First time: start the coroutine by sending None. Exactly one tick — a
+                # task's first dispatch has not yet proven it returns to a
+                # scheduler-visible checkpoint, so any suspension here that isn't one of
+                # our own Futures is reported as a deadlock immediately, same as always.
                 coro_task = asyncio.ensure_future(self._drive_coro(task))
                 await self._real_asyncio_sleep(0)  # dispatch tick — see note above
                 _ = coro_task  # prevent "coroutine was never awaited" warning
@@ -976,6 +1093,15 @@ class Scheduler:
                 fut = self._task_futures.pop(task.task_id, None)
                 if fut is not None and not fut.done():
                     fut.set_result(None)
+                # Wake any tasks blocked in join() on this one (ADR-017, D-62 Option B).
+                # Only the state flips here; each joiner's own pending Future is resolved
+                # later, through the ordinary _resume_task path, once _collect_runnable
+                # sees it RUNNABLE and the scheduler chooses it — same as sleep()'s timer
+                # unblock, not a second resumption mechanism.
+                for joiner_id in self._joiners.pop(task.task_id, []):
+                    joiner = self._tasks.get(joiner_id)
+                    if joiner is not None and joiner.state is TaskState.BLOCKED:
+                        joiner.state = TaskState.RUNNABLE
 
     # ------------------------------------------------------------------
     # Internal: timer management

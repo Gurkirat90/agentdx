@@ -49,6 +49,7 @@ from agentdx.sdk.generic import (
     InstrumentationGap,
     LifecycleHooks,
     RunContext,
+    RunContextError,
     Span,
     UnsupportedTargetError,
     active_run,
@@ -387,8 +388,6 @@ class LangGraphAdapter:
             RunContextError: the graph was invoked outside a run (`E-INSTR-003`).
         """
         if self.run is None:
-            from agentdx.sdk.generic import RunContextError
-
             detail = (
                 "an instrumented LangGraph node ran outside an AgentDX run. Invoke the "
                 "object returned by `agentdx.instrument(...)`, not the original graph"
@@ -649,20 +648,75 @@ class LangGraphAdapter:
         config: object,
         kwargs: Mapping[str, object],
     ) -> object:
-        """Run one node inside its agent span, recording reads, writes and edges."""
+        """Run one node as its own scheduler task, recording reads, writes and edges.
+
+        **D-62 Option B (ADR-017).** Before this, a node's entire body ran inline, as one
+        plain coroutine inside whichever asyncio task Pregel's own dispatch happened to be
+        driving — invisible to the AgentDX scheduler, which is exactly D-62's cause
+        (`d62-design.md` §2-3: the scheduler only recognises suspension on its own
+        `yield_point`/`sleep` Futures; anything else deadlocks it). Now the node body is
+        `spawn()`-ed as its own scheduler task and this method `join()`s it: LangGraph's
+        Pregel executor still decides *what* runs each superstep and still owns superstep
+        barriers and write application (verified deterministic regardless of real
+        completion timing — see `test_pregel_reducer_write_order_is_deterministic.py`);
+        the AgentDX scheduler now controls *when* this node body's internal execution
+        proceeds relative to other concurrent node bodies and LLM calls, via its existing
+        seeded `_choose` policy, the same policy that already governs interleaving around
+        every `yield_point` call.
+
+        This does not add concurrency Pregel did not already have: a fan-out superstep
+        already runs multiple nodes' bodies as real, interleaved asyncio tasks today (that
+        interleaving is the very thing D-62 could not see). What changes is who controls
+        and records the interleaving, not whether it exists.
+
+        Scope: `run_node_sync` (a purely synchronous node with no `await` at all) is
+        deliberately untouched — LangGraph dispatches a sync node through a thread-pool
+        executor, a different concurrency model this pass does not touch; none of the three
+        reference fixtures use a sync node (confirmed: `fixtures/{code_pipeline,
+        research_fanout,support_triage}/graph.py` define every node `async def`).
+        """
+        run = self.require_run()
         agent_id = self.agent_from(node_name)
-        async with agent_scope(
-            agent_id, name=node_name, clock_slot=self.clock_slot_for(node_name, agent_id)
-        ) as open_span:
-            self.deliver_edges(node_name, agent_id, open_span)
-            view = self._view(node_input)
-            try:
-                result = await base.ainvoke(bound, view, config, **kwargs)  # type: ignore[attr-defined]
-            finally:
-                if isinstance(view, RecordingStateView):
-                    view.close()
-            self.record_writes(node_name, agent_id, open_span, result)
-            return result
+        task_id = run.scheduler.spawn(
+            self._run_node_body(run, node_name, agent_id, base, bound, node_input, config, kwargs),
+            agent_id=agent_id,
+        )
+        return await run.scheduler.join(task_id)
+
+    async def _run_node_body(
+        self,
+        run: RunContext,
+        node_name: str,
+        agent_id: str,
+        base: type,
+        bound: object,
+        node_input: object,
+        config: object,
+        kwargs: Mapping[str, object],
+    ) -> object:
+        """The node body, as it runs inside its own scheduler-spawned task.
+
+        Rebinds `_RUN` explicitly (`use_run`) rather than relying on ambient contextvar
+        propagation: `Scheduler.spawn` only registers this coroutine — the real
+        `asyncio.Task` wrapping it is created later, inside the scheduler's own dispatch
+        loop (`_resume_task`), whose ambient context is the scheduler's own driving task,
+        not `run_node_async`'s caller. Without this rebind, every SDK call in the node body
+        (`agent_scope`, `state_read`/`state_write`) would raise `RunContextError` the moment
+        it tried to read the run that, from its own task's point of view, was never bound.
+        """
+        with use_run(run):
+            async with agent_scope(
+                agent_id, name=node_name, clock_slot=self.clock_slot_for(node_name, agent_id)
+            ) as open_span:
+                self.deliver_edges(node_name, agent_id, open_span)
+                view = self._view(node_input)
+                try:
+                    result = await base.ainvoke(bound, view, config, **kwargs)  # type: ignore[attr-defined]
+                finally:
+                    if isinstance(view, RecordingStateView):
+                        view.close()
+                self.record_writes(node_name, agent_id, open_span, result)
+                return result
 
     def run_node_sync(
         self,

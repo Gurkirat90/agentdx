@@ -393,6 +393,24 @@ class SchedulerConfig:
     calibration_agent_step_ms: int = 50
     """Q-43.2.3 default virtual duration for a span of kind `agent_step`."""
 
+    resume_drain_ticks: int = 200
+    """Real (not virtual) `asyncio` ticks `_resume_task` may grant a task **it is resuming**
+    from one of the scheduler's own Futures (`yield_point`/`sleep`/`join`) while waiting for
+    it to settle (`DONE`, or a fresh scheduler-visible suspension), before giving up and
+    raising `SchedulerError` (`E-SCHED-001`).
+
+    Added after ADR-017 (D-62, Option B): resuming such a task can pass through real
+    `asyncio` machinery neither the scheduler nor AgentDX creates — concretely, LangGraph's
+    `Runnable.ainvoke` unconditionally shields its `on_chain_end` callback in a fresh
+    `asyncio.create_task`, even with zero handlers configured, needing a handful of real
+    ticks to unwind. Deliberately **does not** apply to a task's first dispatch — that path
+    still gets exactly one tick, so a task that has never yet reached one of the scheduler's
+    own suspension points is still reported as a deadlock immediately (`E-SCHED-003`); see
+    `_resume_task`'s docstring for why this split is safe and what it does not weaken (the
+    original D-62 decisive experiment and `test_deadlock_error_names_every_stuck_task` both
+    still pass unchanged). Real-time-only: does not touch `sched_step`, virtual time, or
+    anything the canonical projection depends on (I1 unaffected)."""
+
     def with_overrides(self, **kwargs: object) -> SchedulerConfig:
         """Return a copy with the non-None keyword arguments applied.
 
