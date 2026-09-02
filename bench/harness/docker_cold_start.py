@@ -54,6 +54,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Final
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_PATH = REPO_ROOT / "bench" / "results" / "docker-cold-start.json"
@@ -118,6 +119,11 @@ class Outcome:
     failed_step: str | None = None
     detail: str = ""
     seed_exit_code: int | None = None
+    base_images_present: list[str] = field(default_factory=list)
+    """Which base images the daemon already held when the clock started. A non-empty list
+    means this run skipped a registry pull a fresh machine would pay — the largest known
+    source of run-to-run spread (140.273 s vs 106.342 s, same commit, 2026-09-01)."""
+
     log_tail: list[str] = field(default_factory=list)
 
     @property
@@ -187,12 +193,62 @@ def _compose(
     )
 
 
-def _go_cold() -> None:
+BASE_IMAGES: Final = (
+    "node:20-bookworm-slim",
+    "python:3.12-slim-bookworm",
+    "ghcr.io/astral-sh/uv:0.5.11",
+)
+"""The three images the Dockerfile pulls. `docker builder prune` does NOT remove these —
+they live in the image store, not the build cache — so a run that finds them present skips
+a registry pull that a fresh machine would pay. Recorded, and removable with --pull-cold."""
+
+
+def _base_images_present() -> list[str]:
+    """Return which of `BASE_IMAGES` the daemon already has locally.
+
+    Guarantees: never raises. An image whose presence cannot be determined is reported as
+    absent, which biases the record toward "this run may have paid a pull" rather than
+    toward a flattering number.
+    """
+    present: list[str] = []
+    for ref in BASE_IMAGES:
+        probe = subprocess.run(  # noqa: S603 -- argv is this module's own literals
+            ["docker", "image", "inspect", ref, "--format", "{{.Id}}"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode == 0:
+            present.append(ref)
+    return present
+
+
+def _remove_base_images() -> None:
+    """Delete the pulled base images so the next build pays a real registry pull."""
+    for ref in BASE_IMAGES:
+        subprocess.run(  # noqa: S603 -- argv is this module's own literals
+            ["docker", "image", "rm", "-f", ref],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
+def _go_cold(*, pull_cold: bool = False) -> None:
     """Remove every cached artefact this measurement must not benefit from.
 
     Guarantees: on return, the compose project has no containers, no volumes and no locally
     built image, the builder cache is empty, and the bind-mount data directory is gone. This
     runs *before* the clock starts, so its own cost is never counted.
+
+    **What this does NOT remove by default: the pulled base images.** `docker builder prune`
+    empties the build cache; base images live in the image store and survive it. Two cold
+    runs of the same commit on 2026-09-01 measured 140.273 s and 106.342 s — a 34 s spread
+    explained largely by the first paying a registry pull the second did not. `cold_cache:
+    true` therefore means "no build cache", not "nothing cached at all". PRD §44.1 says only
+    "cold cache" and does not settle whether a fresh CI runner's image pull counts; changing
+    the default would move a gate's goalposts silently, so it is recorded rather than
+    changed. Pass `--pull-cold` for the stricter reading.
 
     **This is destructive beyond this project.** `docker builder prune -af` takes no project
     scope: it empties the whole daemon's build cache, so every other repository on the machine
@@ -202,6 +258,8 @@ def _go_cold() -> None:
     never be cited as the gate.
     """
     _compose("down", "-v", "--rmi", "local", "--remove-orphans")
+    if pull_cold:
+        _remove_base_images()
     subprocess.run(
         ["docker", "builder", "prune", "-af"],  # noqa: S607
         capture_output=True,
@@ -293,7 +351,9 @@ def _log_tail(lines: int = 40) -> list[str]:
     return logs.stdout.strip().splitlines() if logs.stdout else []
 
 
-def measure(threshold_s: float, *, prune: bool, allow_any_arch: bool) -> Outcome:
+def measure(
+    threshold_s: float, *, prune: bool, allow_any_arch: bool, pull_cold: bool = False
+) -> Outcome:
     """Run one cold `docker compose up` and time it to a healthy, populated demo.
 
     Guarantees: the returned `Outcome` reflects only what was observed. Every field that was
@@ -315,7 +375,9 @@ def measure(threshold_s: float, *, prune: bool, allow_any_arch: bool) -> Outcome
     )
 
     if prune:
-        _go_cold()
+        _go_cold(pull_cold=pull_cold)
+
+    outcome.base_images_present = _base_images_present()
 
     started = time.monotonic()
     up = _compose("up", "-d", "--build", timeout=threshold_s * 3)
@@ -392,6 +454,10 @@ def _write_results(outcome: Outcome) -> None:
         "threshold_s": outcome.threshold_s,
         "met": outcome.met,
         "cold_cache": outcome.cold_cache,
+        "base_images_present": outcome.base_images_present,
+        "base_images_pulled_this_run": [
+            r for r in BASE_IMAGES if r not in outcome.base_images_present
+        ],
         "is_gate_conformant_run": outcome.cold_cache and outcome.arch_conformant,
         "environment": {
             "machine": outcome.arch,
@@ -457,13 +523,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--allow-any-arch", action="store_true")
     parser.add_argument(
+        "--pull-cold",
+        action="store_true",
+        help="also delete the pulled base images, so the build pays a real registry pull",
+    )
+    parser.add_argument(
         "--keep-up", action="store_true", help="leave the stack running for inspection"
     )
     args = parser.parse_args(argv)
 
     try:
         outcome = measure(
-            args.threshold_s, prune=not args.no_prune, allow_any_arch=args.allow_any_arch
+            args.threshold_s,
+            prune=not args.no_prune,
+            allow_any_arch=args.allow_any_arch,
+            pull_cold=args.pull_cold,
         )
     except CannotMeasure as exc:
         sys.stderr.write(f"G10: CANNOT MEASURE — {exc}\n")

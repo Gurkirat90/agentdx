@@ -2,7 +2,7 @@
   "benchmark": "docker-cold-start",
   "cold_cache": true,
   "criterion": "PRD \u00a744.1 G10: `docker compose up` reaches a healthy /api/health AND a populated run list, cold cache, arm64, under the threshold.",
-  "detail": "`docker compose up -d --build` exited 1 after 140.273s. Exit 5: an internal error. This is the exit code D-62's scheduler deadlock surfaces as \u2014 nothing in sdk/ calls Scheduler.spawn(), so LangGraph's parallel fan-out has no runnable task and the cooperative loop stalls. stderr tail:  Container agentdx-g10-seed-1 Starting  |  Container agentdx-g10-seed-1 Started  |  Container agentdx-g10-seed-1 Waiting  |  Container agentdx-g10-seed-1 Error service \"seed\" didn't complete successfully: exit 5 | service \"seed\" didn't complete successfully: exit 5",
+  "detail": "`docker compose up -d --build` exited 1 after 106.342s. Exit 5: an internal error. This is the exit code D-62's scheduler deadlock surfaces as \u2014 nothing in sdk/ calls Scheduler.spawn() (zero hits against a spawn defined at runtime/scheduler.py:752). NOTE: earlier revisions of this string said 'LangGraph's parallel fan-out has no runnable task'. d62-design.md \u00a73 downgrades that to a hypothesis \u2014 _resume_task grants one event-loop tick per resumption and recognises only scheduler-created Futures as suspension, so any await needing more than one tick deadlocks regardless of concurrency. Fan-out may be incidental. Check the log_tail's wait_reason: empty means no yield point was ever reached. stderr tail:  Container agentdx-g10-seed-1 Starting  |  Container agentdx-g10-seed-1 Started  |  Container agentdx-g10-seed-1 Waiting  |  Container agentdx-g10-seed-1 Error service \"seed\" didn't complete successfully: exit 5 | service \"seed\" didn't complete successfully: exit 5",
   "environment": {
     "arch_conformant": true,
     "implementation": "CPython",
@@ -27,7 +27,7 @@
   "seed_exit_code": 5,
   "threshold_s": 180.0,
   "timings_wall_s": {
-    "build_and_up_wall_s": 140.273,
+    "build_and_up_wall_s": 106.342,
     "healthy_at_wall_s": null,
     "populated_at_wall_s": null
   }
