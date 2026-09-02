@@ -267,8 +267,13 @@ def _diagnose_seed(exit_code: int | None) -> str:
         "not cover a call the run made. This is I7 working, not failing.",
         4: "Exit 4: an abort guard stopped the run.",
         5: "Exit 5: an internal error. This is the exit code D-62's scheduler deadlock "
-        "surfaces as — nothing in sdk/ calls Scheduler.spawn(), so LangGraph's parallel "
-        "fan-out has no runnable task and the cooperative loop stalls.",
+        "surfaces as — nothing in sdk/ calls Scheduler.spawn() (zero hits against a spawn "
+        "defined at runtime/scheduler.py:752). NOTE: earlier revisions of this string said "
+        "'LangGraph's parallel fan-out has no runnable task'. d62-design.md §3 downgrades "
+        "that to a hypothesis — _resume_task grants one event-loop tick per resumption and "
+        "recognises only scheduler-created Futures as suspension, so any await needing more "
+        "than one tick deadlocks regardless of concurrency. Fan-out may be incidental. "
+        "Check the log_tail's wait_reason: empty means no yield point was ever reached.",
         6: "Exit 6: determinism verification failed.",
         7: "Exit 7: no scenarios or runs were found — the target never resolved to anything "
         "runnable, so no agent executed and D-62 was never reached. This was D-77's "
