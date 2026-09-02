@@ -11,7 +11,12 @@ uv run python scripts/check_ledger.py
 uv run python scripts/check_bench_markers.py
 uv run ruff check bench/harness/docker_cold_start.py
 uv run ruff format --check bench/harness/docker_cold_start.py
-uv run mypy --strict bench/harness/docker_cold_start.py || true   # bench/ is outside src/
+# No `|| true`. An earlier revision of this line had one, and it silently swallowed a real
+# `no-any-return` error so the commit proceeded — a bypass built into a pre-flight check, in
+# a repository whose whole discipline is refusing to report unverified results. `bench/` is
+# outside `just typecheck`'s scope (`mypy --strict src/agentdx`), so this is the only place
+# the harness gets type-checked at all. It gates.
+uv run mypy --strict bench/harness/docker_cold_start.py
 
 echo
 echo "=== commit ==="

@@ -281,9 +281,13 @@ def _http_json(url: str) -> object | None:
         with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT_S) as response:  # noqa: S310
             if response.status != 200:
                 return None
-            return json.loads(response.read().decode("utf-8"))
+            # `json.loads` is typed `Any`; binding it to `object` before returning is what
+            # makes this function's declared type honest under `mypy --strict`, rather than
+            # letting `Any` leak out through a return annotation that promises `object`.
+            decoded: object = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return None
+    return decoded
 
 
 def _seed_exit_code() -> int | None:
