@@ -182,24 +182,32 @@ Non-negotiable, and each needs a test that fails when it is broken:
 
 ## 6. Recommended sequence
 
-**Updated 2026-09-02 (OP-3 against the P20 OP-2 audit): step 1 below is done.** An earlier
-revision of this section opened with "run the §3 experiment" as the first future step; that
-self-contradicted §3 above, which already reports the experiment's result. Renumbered so the
-sequence starts from what is actually still open.
+**Updated 2026-09-02 (second pass, same day): steps 1-3 below are done.** Option B is chosen
+and recorded as **ADR-017** (`CONTEXT.md` §8). What follows is the state as of that decision,
+kept rather than rewritten so the reasoning stays visible.
 
 1. ~~Run the §3 experiment.~~ **Done, 2026-09-01/02.** Result: fan-out is not the cause; see
-   §3 and D-81. §3a (Option D) is the one new candidate the measurement itself produced —
-   decide whether it's worth its own experiment before picking among A/B/D.
-2. **ADR for the Protocol change** — needed only if A or B is chosen. `sdk.generic.Scheduler`
-   gaining `spawn` is a public interface change (`AGENTS.md` §3). Write it before the code.
-   Option D would not need this ADR at all, which is part of its appeal (§3a) and part of why
-   it needs scrutiny before being assumed smaller-therefore-better.
-3. **Pick A, B or D on evidence**, not on this document's guess — Option D needs its own
-   experiment first (§3a); A and B still rest on the original hypothesis, now confirmed. If D
-   is ruled out, B is the smaller bet of the two and A is the one that closes D-55.
-4. **Re-run G3 and G2 first**, before G1 or G4. If real execution breaks determinism or
-   produces a false positive on the healthy fixture, that is the finding — and both gates are
-   on PRD §44.3's never-waived list.
+   §3 and D-81.
+2. ~~Check Option B's own flagged assumption before writing its ADR.~~ **Done, 2026-09-02.**
+   `tests/integration/sdk/test_pregel_reducer_write_order_is_deterministic.py`: against the
+   pinned LangGraph (1.2.10), a `research_fanout`-shaped 4-worker fan-out into one
+   `operator.add` reducer produced 23 of 24 possible real completion orderings across 80 runs,
+   and exactly one final write order every time — `apply_writes` sorts tasks by path before
+   folding writes, so the fold order is a fixed function of graph structure, not of real
+   completion timing. Option D was not re-examined; it remains exactly where §3a left it,
+   needing its own experiment, not chosen here.
+3. ~~Pick A, B or D and write the ADR.~~ **Done, 2026-09-02 — Option B, ADR-017.** Rationale
+   in the ADR itself: A's cost (coupling to LangGraph's non-public step API) was judged higher
+   than B's now-checked assumption; D was not re-litigated, its own unresolved I1 risk stands.
+   **Accepted trade, stated plainly:** D-55 is not closed by this choice — only Option A would
+   have closed it — because D-55 is P1/cut-safe while G1/G4/G9/G10 are not (`CONTEXT.md` §5).
+4. **Next, not yet started:** implement — widen `sdk.generic.Scheduler` with `spawn()`, wire
+   `sdk/langgraph.py::run_node_async` to use it. This is its own unit of work, checkpointed
+   with the owner before starting rather than folded into the ADR pass, precisely because it
+   is the higher-blast-radius half of this decision.
+5. **Re-run G3 and G2 first**, before G1 or G4, once built. If real execution breaks
+   determinism or produces a false positive on the healthy fixture, that is the finding — and
+   both gates are on PRD §44.3's never-waived list.
 5. Only then G1, G4, and the demo gates.
 
 ## 7. What this does not touch
