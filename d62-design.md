@@ -1,11 +1,12 @@
 # D-62 design — making an agent step a scheduler task
 
-**Status:** design only. No code. Written to be reviewed and argued with before anyone
-implements it, because the cheapest thing to get wrong here is the framing, and the framing
-in `CONTEXT.md` today is imprecise.
+**Status:** design only. No code. **§3's experiment has been run** (2026-09-01) and its
+result is recorded there: the framing in `CONTEXT.md` — and in the first revision of this
+document — was wrong. Fan-out is not D-62's cause.
 
-Everything below is from reading the shipped code. Line references are real. Section 3 is a
-**hypothesis with an experiment attached** — run the experiment before building anything.
+Everything here is from reading the shipped code or from that experiment; line references are
+real, and every claim is marked as one or the other. §3a (Option D) exists *because* of the
+measurement and was not in the original option set.
 
 ---
 
@@ -48,41 +49,83 @@ boundaries, not state writes.
 A task suspends by awaiting a Future *the scheduler created* (`yield_point` → `RUNNABLE`,
 `sleep` → `BLOCKED` + a timer). `_collect_runnable` only collects `PENDING` and `RUNNABLE`.
 
-So a task that suspends on anything **else** — any real async machinery needing more than one
-tick — stays in `RUNNING`. It is not runnable, it has no timer, and `_has_remaining_tasks()`
-is still true. `_scheduler_loop` raises `DeadlockError` (`E-SCHED-003`).
+So a task that suspends on anything **else** stays in `RUNNING`. It is not runnable, it has
+no timer, and `_has_remaining_tasks()` is still true — `_scheduler_loop` raises
+`DeadlockError` (`E-SCHED-003`).
+
+*(An earlier revision said "any real async machinery needing more than one tick". The tick
+count is retracted — see §3's retraction. The measured condition is "a suspension whose
+resolution requires the event loop to run another task".)*
 
 That is exactly the observed failure: `{t_r_50f3b6_root_0: }` — one root task, **empty**
 `wait_reason`, because `wait_reason` is only set by `yield_point`/`sleep` and the root never
 reached either.
 
-## 3. The framing correction — and the experiment that settles it
+## 3. The framing correction — SETTLED BY EXPERIMENT, 2026-09-01
 
-`CONTEXT.md` §7/§9, the `Dockerfile` header, and this session's own earlier notes all say the
-deadlock is caused by **LangGraph's parallel fan-out**. Reading the loop, that looks wrong, or
-at least unproven.
+`CONTEXT.md` §7/§9, the `Dockerfile` header and this session's own earlier notes all said the
+deadlock is caused by **LangGraph's parallel fan-out**. That is **wrong**, and it is now
+measured rather than argued.
 
-**Hypothesis: parallelism is incidental. The scheduler requires every in-task suspension to
-be a scheduler Future and grants one event-loop tick between resumptions. Any `await` on real
-async machinery that needs more than one tick deadlocks it — fan-out or not.** A strictly
-sequential LangGraph graph should deadlock the same way, provided its `ainvoke` awaits
-anything that does not settle in a single tick.
+`tests/integration/runtime/test_d62_suspension_contract.py`, run on Darwin/arm64, CPython
+3.12.2:
 
-**The experiment, before any design is chosen:** build a single-node, strictly sequential
-LangGraph graph with no fan-out and no LLM call, instrument it, and run it under a real
-`Scheduler`.
+| Probe | Result |
+|---|---|
+| root coroutine that never suspends | **completes** |
+| root awaiting an already-resolved Future | **completes** |
+| root awaiting an `Event` set by another real task | **`DeadlockError`** |
+| **single-node sequential LangGraph graph, no fan-out** | **`DeadlockError`** |
 
-- **Deadlocks** → the hypothesis holds. The problem is the task/suspension contract, and
-  fan-out is a red herring. Options A and B below are both about ownership of *suspension*,
-  not of *parallelism*.
-- **Completes** → the hypothesis is wrong, fan-out really is the trigger, and the design space
-  narrows to concurrency only.
+**The boundary, stated only as far as it was observed:** the scheduler tolerates `await`, but
+not an `await` whose resolution requires the event loop to run *another task*. The first two
+probes are what make that precise — without them, "the scheduler rejects suspension" would
+have been the obvious and wrong reading.
 
-This is one small test and it changes which design is correct. Do not skip it. Note that the
-ledger has already misattributed one failure in this exact area (G9's exit 7 was blamed on
-D-62 for two days, and was actually target resolution — D-77).
+**A graph with nothing to parallelise cannot be deadlocked by parallelism.** Fan-out is
+incidental. D-62 is a suspension-contract problem.
 
-## 4. Three designs
+### Retraction: the "one event-loop tick" claim
+
+An earlier revision of this section asserted a **one event-loop tick** budget. `_resume_task`
+does grant exactly one `await self._real_asyncio_sleep(0)` — that much is readable — but the
+tick *count* was never measured, and the first version of the experiment that claimed to
+measure it was broken: its "one tick" control used `ensure_future` + `Event.wait()`, and
+`ensure_future` only schedules, so the case always required another task to run and could
+never have passed. The control failed, which is what controls are for. **The tick number is
+retracted; "requires another task to run" is what the evidence supports.**
+
+## 3a. Option D — the option the experiment suggests, which §4 did not consider
+
+Options A, B and C below were all written on the assumption that D-62 is about *who owns
+scheduling*. The measurement points somewhere much smaller.
+
+`_scheduler_loop` raises `DeadlockError` the moment no **scheduler** task is runnable and no
+scheduler timer is pending — **while the real event loop may still have pending work**. The
+`Event`-setter probe proves this directly: that coroutine completes fine under a plain
+`asyncio.run`; the scheduler refuses a suspension that would have resolved.
+
+**Option D: do not declare deadlock while the event loop has pending work.** Before raising,
+yield to the real loop and re-check. If the loop makes progress, continue; if nothing is
+runnable after a genuine quiesce, *then* it is a deadlock.
+
+- **Gets:** possibly the whole of D-62, in `runtime/scheduler.py`, without touching `sdk/`,
+  without widening `sdk.generic.Scheduler`, and without coupling to Pregel internals. Every
+  probe above would pass.
+- **Costs, and these are the reason this is not a recommendation:** letting the real loop run
+  work the scheduler cannot see is exactly what **I1** exists to prevent. It is only safe if
+  that work emits no events — true for Pregel's plumbing, *not* guaranteed in general.
+  Detecting "the loop has pending work" without depending on CPython internals needs care.
+  And a wrong version of this converts a real deadlock into a hang, losing `E-SCHED-003`'s
+  diagnostic value.
+- **Verdict: needs its own experiment before it is a candidate**, not adoption on the strength
+  of being smaller. But it must be on the list, because A and B both pay a large cost to solve
+  a problem that may not be the one that exists.
+
+## 4. The original three designs
+
+Written before the experiment. Read §3a first — the measurement may make all three
+unnecessary.
 
 ### Option A — the scheduler drives Pregel, one superstep at a time
 
