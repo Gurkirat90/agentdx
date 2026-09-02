@@ -182,11 +182,21 @@ Non-negotiable, and each needs a test that fails when it is broken:
 
 ## 6. Recommended sequence
 
-1. **Run the §3 experiment.** One test, and it decides the framing.
-2. **ADR for the Protocol change.** `sdk.generic.Scheduler` gaining `spawn` is a public
-   interface change (`AGENTS.md` §3). Write it before the code.
-3. **Pick A or B on the experiment's evidence**, not on this document's guess. If the
-   hypothesis holds, B is the smaller bet and A is the one that closes D-55.
+**Updated 2026-09-02 (OP-3 against the P20 OP-2 audit): step 1 below is done.** An earlier
+revision of this section opened with "run the §3 experiment" as the first future step; that
+self-contradicted §3 above, which already reports the experiment's result. Renumbered so the
+sequence starts from what is actually still open.
+
+1. ~~Run the §3 experiment.~~ **Done, 2026-09-01/02.** Result: fan-out is not the cause; see
+   §3 and D-81. §3a (Option D) is the one new candidate the measurement itself produced —
+   decide whether it's worth its own experiment before picking among A/B/D.
+2. **ADR for the Protocol change** — needed only if A or B is chosen. `sdk.generic.Scheduler`
+   gaining `spawn` is a public interface change (`AGENTS.md` §3). Write it before the code.
+   Option D would not need this ADR at all, which is part of its appeal (§3a) and part of why
+   it needs scrutiny before being assumed smaller-therefore-better.
+3. **Pick A, B or D on evidence**, not on this document's guess — Option D needs its own
+   experiment first (§3a); A and B still rest on the original hypothesis, now confirmed. If D
+   is ruled out, B is the smaller bet of the two and A is the one that closes D-55.
 4. **Re-run G3 and G2 first**, before G1 or G4. If real execution breaks determinism or
    produces a false positive on the healthy fixture, that is the finding — and both gates are
    on PRD §44.3's never-waived list.

@@ -27,13 +27,17 @@
 #      The compose command below exits 5, not 0, and the run list is EMPTY. Gate G10 asks
 #      for a *populated* run list; this image cannot produce one, and no amount of packaging
 #      work changes that.
-#      CORRECTION: an earlier revision of this header said "LangGraph's parallel fan-out
-#      therefore deadlocks the single-task scheduler loop" as fact. `d62-design.md` §3
-#      downgrades that to a hypothesis: `_resume_task` grants one event-loop tick per
-#      resumption and recognises only scheduler-created Futures as suspension, so any await
-#      on real async machinery needing more than one tick deadlocks regardless of
-#      concurrency. The observed empty `wait_reason` is consistent with that. Fan-out may
-#      well be incidental. One test settles it; it has not been run.
+#      CORRECTION (2026-09-02, D-81): an earlier revision of this header said "LangGraph's
+#      parallel fan-out therefore deadlocks the single-task scheduler loop" as fact. That is
+#      now measured, not hypothesised, and it is WRONG. `tests/integration/runtime/test_d62_suspension_contract.py`
+#      (P20, commit 5a17eb5): a single-node, strictly sequential LangGraph graph with no
+#      fan-out at all deadlocks identically, while two controls (a root that never suspends;
+#      a root awaiting an already-resolved Future) both complete. Fan-out is incidental. The
+#      boundary actually observed: the scheduler tolerates `await`, but not an `await` whose
+#      resolution requires the event loop to run another task -- see `d62-design.md` §§2-3a
+#      for the corrected mechanism and D-81 for the ledger record. An earlier "one event-loop
+#      tick" claim in this same correction was itself retracted (the control that claimed to
+#      measure it was broken) -- see d62-design.md §3's own retraction note.
 #
 #   2. `agentdx ui` serves the API only. `api/app.py` mounts `api_router` and `ws.router`
 #      and nothing else — there is no `StaticFiles` mount and no `src/agentdx/api/static/`

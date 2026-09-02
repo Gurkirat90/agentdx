@@ -193,13 +193,21 @@ testpaths = ["tests"]
 # `pytest`/`just test`/`just ci` loop would make routine development red for reasons no
 # single commit can fix (AGENTS.md §8's alarm-fatigue concern). `just acceptance` selects
 # them explicitly with `-m acceptance`.
-addopts = "-q --strict-markers --strict-config -m 'not acceptance'"
+# -m "not experiment": same reasoning, same shape, one test. `test_d62_suspension_contract.py`'s
+# decisive probe (P20, D-62) is written to FAIL BY DESIGN while D-62 is open -- "a red test
+# whose failure text is the finding is more honest than a green one asserting a bug it cannot
+# fix." Fine as a standalone diagnostic; wrong as an unmarked member of the default suite, which
+# is exactly what CONTEXT.md §11 tripwire 15 exists to catch. The file's three controls carry no
+# marker and stay in the default run. Whoever closes D-62 deletes or inverts the decisive probe
+# (its own docstring says so) -- that is what removes this marker, not a CI exemption to keep.
+addopts = "-q --strict-markers --strict-config -m 'not acceptance and not experiment'"
 asyncio_mode = "strict"
 markers = [
   "determinism: replay-equality suites (I1, gate G3)",
   "false_positives: healthy-fixture control (I4, gate G2)",
   "benchmark: published-number producers (I9, Rule E1)",
   "acceptance: PRD §44.1 gate verification (G1-G10) -- literal command, real exit code, several known-red until their tracked gap closes; excluded from default collection, run via `just acceptance`",
+  "experiment: a diagnostic probe expected to stay red until its own tracked CONTEXT.md gap closes (D-62); excluded from default collection, run via `pytest -m experiment`",
 ]
 # PYTHONHASHSEED=0 is required project-wide (AGENTS.md §4.1); the justfile and
 # CI set it in the environment because pytest cannot set it for its own process.

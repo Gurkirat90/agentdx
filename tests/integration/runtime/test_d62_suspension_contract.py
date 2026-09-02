@@ -39,7 +39,16 @@ The ladder below replaces it and locates the boundary in terms that were actuall
 suspension, but not suspension whose resolution requires another task to run.** If 1 or 2
 fails, the harness is broken and 3 proves nothing — read them first.
 
-    just test tests/integration/runtime/test_d62_suspension_contract.py -v
+    just test tests/integration/runtime/test_d62_suspension_contract.py -v -m experiment
+
+**Repair note (2026-09-02, OP-3 against the P20 OP-2 audit).** Test 4 now carries
+`@pytest.mark.experiment` and is excluded from the default `pytest`/`just test`/`just ci`
+collection (`pyproject.toml`), the same treatment `tests/acceptance/` already gets and for the
+same reason: it is written to fail by design while D-62 is open, and an unmarked member of the
+default suite going red for a reason no single commit can fix is exactly what CONTEXT.md §11
+tripwire 15 exists to catch. Tests 1-3 (the controls) carry no marker and still run by default —
+only the decisive probe is excluded. The command above now needs `-m experiment` to include it;
+plain `just test tests/integration/runtime/test_d62_suspension_contract.py -v` runs only 1-3.
 
 **Why `strict_determinism=False`, and why that is not a bypass.** `strict` gates three
 unrelated things in `DeterminismGuard`: the `PYTHONHASHSEED` check, `_patch_time` and
@@ -158,6 +167,7 @@ async def test_a_suspension_needing_another_task_deadlocks() -> None:
     assert "E-SCHED-003" in str(caught.value)
 
 
+@pytest.mark.experiment
 @pytest.mark.asyncio
 async def test_a_sequential_langgraph_graph_deadlocks_with_no_fanout_at_all() -> None:
     """THE DECISIVE ONE. A single-node, strictly sequential LangGraph graph — no fan-out.
