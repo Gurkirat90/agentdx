@@ -488,7 +488,10 @@ against all three real fixtures end-to-end, and — unlike either α spike — i
 real `asyncio.Task` inherits a copy of someone else's ambient identity — the fan-out case ADR-
 018 already distinguishes from an inline continuation): if the task that identity belongs to
 (e.g. root) is currently `RUNNING`, flip it to `BLOCKED` and record it in a new
-`self._backgrounded: set[str]`. This is the "block" half the reverted attempt in §8.3 already
+`self._backgrounded: dict[str, None]` (a dict standing in for a set — only membership and
+truthiness are ever needed, never iteration order; `check_determinism_hygiene.py` flags bare
+`set()` literals, per this codebase's established pattern — see the field's own declaration
+comment in `runtime/scheduler.py`). This is the "block" half the reverted attempt in §8.3 already
 proved works — `_resume_task`'s drain loop returns the moment its own task leaves `RUNNING`,
 handing control back to `_scheduler_loop`, which can then see and dispatch the newly
 `spawn()`-ed node body through its *ordinary* top-level path: one `_choose()` call per real
@@ -497,11 +500,20 @@ fanned-out node body never becomes a second kind of scheduling decision, so `exp
 `decision_step` addressing (§8.6) is never in the blast radius at all — not fixed around,
 simply never reached. (2) Deliberately does **not** rebuild the "wake" half that broke the
 earlier attempt (`RuntimeError: coroutine is being awaited already`, §8.3). `end_call` is
-unchanged — no re-dispatch through `_resume_task`, ever. `_backgrounded` membership is instead
-cleared in `_drive_coro`'s own completion `finally` block, alongside its existing
-`_identity_owners` cleanup — i.e. only once the task's real, already-alive `asyncio.Task`
-(from its own first dispatch) genuinely reaches `DONE`, through the path that has always
-existed for that. `_scheduler_loop`'s deadlock branch is taught one new fact: when nothing is
+unchanged — no re-dispatch through `_resume_task`, ever. As originally built, `_backgrounded`
+membership was cleared only in `_drive_coro`'s own completion `finally` block, alongside its
+existing `_identity_owners` cleanup — i.e. only once the task's real, already-alive
+`asyncio.Task` (from its own first dispatch) genuinely reached `DONE`.
+
+**Superseded, 2026-09-03 (ADR-022, `CONTEXT.md` §8).** DONE-only clearing left a stale entry
+for a parent's *entire remaining execution* once any fan-out call minted under it, past that
+specific call's own closing — an independent OP-2 audit of this section found it, and it
+proved real (an unrelated later deadlock could pick up an unwarranted `resume_drain_ticks`
+grace delay it should never have gotten). Fixed by clearing membership from the task's own
+*next* genuine scheduler call instead (`_clear_backgrounded_checkin`, called from `join`/
+`sleep`/`yield_point`) — see `CONTEXT.md` §8 for the rejected reference-counting attempt and
+why check-in-based clearing is correct instead; not restated here. `_scheduler_loop`'s
+deadlock branch is taught one new fact: when nothing is
 runnable and no timer exists, check `self._backgrounded` before declaring deadlock — a
 non-empty set means some task's own real background work may still be settling, so grant real
 ticks up to `resume_drain_ticks` (the same bound `_resume_task`'s own drain loop already uses)

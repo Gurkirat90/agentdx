@@ -584,16 +584,48 @@ class Scheduler:
         # why this distinction, found empirically, is the actual fix.
         self._identity_owners: dict[str, asyncio.Task[object]] = {}
         # task_ids currently BLOCKED specifically because a begin_call-minted nested call
-        # is outstanding under them (candidate beta, D-62 task #25 dispatch gap, ADR
-        # pending). Populated by begin_call's mint branch, cleared only by _drive_coro's
-        # own completion path when the task actually reaches DONE — see begin_call's own
-        # docstring for why membership is not tied to the outstanding call closing.
-        # _scheduler_loop's deadlock check consults this before declaring deadlock.
+        # is (or, per ADR-022 below, recently was) outstanding under them (candidate beta,
+        # D-62 task #25 dispatch gap, ADR-019). Populated by begin_call's mint branch;
+        # cleared the moment that task's own identity next makes a genuine scheduler call
+        # (`_clear_backgrounded_checkin`, called from `join`/`sleep`/`yield_point`) — proof
+        # its own raw, unmanaged await (e.g. Pregel's `asyncio.gather` over the fan-out it
+        # was waiting on) has actually resolved and it is back to being an ordinary,
+        # scheduler-tracked task — with `_drive_coro`'s own completion `finally` as a
+        # fallback for the case where that task reaches DONE without ever checking back in
+        # again (the fan-out was the last thing it ever did). `_scheduler_loop`'s deadlock
+        # check consults this (as a plain truthiness/non-empty check) before declaring
+        # deadlock.
+        #
+        # ADR-022 (2026-09-03): an earlier version of this comment, and the code, cleared
+        # membership only via the `_drive_coro`-on-DONE path — never on the task's own next
+        # check-in. Found by an independent audit, then confirmed empirically (a synthetic
+        # probe and a real `code_pipeline` run) to leave a stale, misleading entry for the
+        # parent's *entire remaining execution* after a fan-out resolves — e.g. `tester`'s
+        # own dispatch, several steps after `coder`/`reviewer` finished, still saw root
+        # listed here. Not a hang (bounded by `resume_drain_ticks` either way), but a real
+        # defect: any genuinely unrelated deadlock later in that same window got an
+        # unwarranted ~200-tick grace delay, and could surface a `wait_reason` naming a
+        # fan-out call that had already returned. A first fix (decrement a per-parent
+        # reference count in `end_call`, keyed by which parent each call was minted under)
+        # was tried and found, empirically, to be too eager: `end_call` runs on the
+        # *child's* own frame, the instant the last child's own call closes — but the
+        # parent's raw `await` (e.g. `asyncio.gather`) still needs a few more real ticks
+        # after that to actually resolve and hand control back to the parent's own
+        # coroutine, and clearing membership that early let `_scheduler_loop` see an empty
+        # `_backgrounded` and declare `DeadlockError` in that exact gap — reproduced
+        # directly (a trace showing `_backgrounded` correctly reaching `{}` right after the
+        # last `end_call`, immediately followed by `DeadlockError`, no further ticks
+        # granted). Checking in from the *parent's own* next scheduler call, instead, keeps
+        # granting real ticks for exactly as long as needed for the parent's own raw await
+        # to settle (identical to the old, correct half of the previous design), while
+        # still fixing the staleness (the entry cannot survive past the parent's own next
+        # genuine scheduler-visible action, whatever it is).
+        #
         # dict[str, None], not set[str]: check_determinism_hygiene.py (I1, tripwire 2) flags
         # every bare `set()` literal, since set iteration order is a CPython implementation
         # detail, not a language contract — found on real Python 3.12 hardware (this file had
         # never been runnable end-to-end under the real Scheduler before candidate beta, so
-        # the checker had nothing real to walk here until now). Only membership (`in`/`add`-
+        # the checker had nothing real to walk here until then). Only membership (`in`/`add`-
         # equivalent/`discard`-equivalent) and truthiness are ever needed — never iterated —
         # but the checker flags the bare `set()` call site regardless, and this codebase's own
         # established pattern for exactly this shape is a dict (see `self._identity_owners`
@@ -656,6 +688,7 @@ class Scheduler:
                 f"known to this scheduler — was this coroutine spawned outside ``run()``?"
             )
             raise SchedulerError(detail)
+        self._clear_backgrounded_checkin(task_id)
         self._fault_hook.pre_yield(task_id, reason)
         task.state = TaskState.RUNNABLE
         task.wait_reason = reason
@@ -687,6 +720,7 @@ class Scheduler:
         if task is None:
             detail = f"sleep({ms}ms) called from task {task_id!r} not known to this scheduler"
             raise SchedulerError(detail)
+        self._clear_backgrounded_checkin(task_id)
         wake_at = self._clock.now_ms() + ms
         task.state = TaskState.BLOCKED
         task.wait_reason = f"sleep({ms}ms)"
@@ -741,6 +775,7 @@ class Scheduler:
         if target is None:
             detail = f"join({task_id!r}) names a task this scheduler never registered"
             raise SchedulerError(detail)
+        self._clear_backgrounded_checkin(caller_id)
 
         if target.state is not TaskState.DONE:
             caller.state = TaskState.BLOCKED
@@ -888,6 +923,25 @@ class Scheduler:
         )
         self._tasks[task_id] = task
         return task_id
+
+    def _clear_backgrounded_checkin(self, task_id: str) -> None:
+        """Drop `task_id` from `self._backgrounded`, if present — ADR-022.
+
+        Called from `join`/`sleep`/`yield_point`'s own top, for whichever identity is
+        calling them, right as each confirms that identity names a real, known scheduler
+        task. A no-op for the overwhelming majority of calls (`task_id` is almost never a
+        member — only a task that `begin_call`'s mint branch background-flipped ever is).
+
+        When `task_id` *is* a member, this is the task's own next genuine scheduler call
+        since it was backgrounded — proof its own raw, unmanaged await (Pregel's own
+        `asyncio.gather` over a fan-out it minted calls under) has actually resolved, and
+        it has returned to being an ordinary task the scheduler tracks normally again.
+        Whatever suspension this particular call is about to set up (a fresh `BLOCKED` on
+        `join`, `RUNNABLE` on `yield_point`, etc.) happens immediately afterward, in the
+        caller — this method only ever removes the stale membership, never touches
+        `Task.state`/`wait_reason` itself.
+        """
+        self._backgrounded.pop(task_id, None)
 
     def begin_call(self, *, agent_id: str) -> str:
         """Mint a private scheduler identity for one call into `spawn`/`join`, if needed.
