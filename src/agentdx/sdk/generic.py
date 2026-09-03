@@ -1810,6 +1810,9 @@ async def run(
       neither analysable nor honestly incomplete.
     * `RunResult.gaps` carries every construct the adapter could not capture, so a caller can
       refuse to trust an analysis rather than discovering the hole later.
+    * This coroutine yields to the scheduler once, immediately after `open_run` returns and
+      before the graph is ever invoked (ADR-021). See the `yield_point` call below — this is
+      load-bearing, not decorative; read its comment before removing it.
 
     Args:
         graph: An object returned by `agentdx.instrument()`, or any awaitable/callable.
@@ -1835,6 +1838,46 @@ async def run(
         raise RunContextError(detail)
 
     context = await active.open_run(task=task, scenario=scenario, seed=seed)
+
+    # ADR-021 (2026-09-03, CONTEXT.md §8) — root's own first scheduler-recognised checkpoint.
+    #
+    # `Scheduler._resume_task` deliberately gives a task's *first* dispatch exactly one real
+    # event-loop tick: it has not yet proven it returns to a suspension the scheduler itself
+    # created, so any suspension that isn't one of our own Futures is a deadlock, immediately
+    # (`d62-design.md` §2-3, and `tests/integration/runtime/test_d62_suspension_contract.py`'s
+    # own `test_a_suspension_needing_another_task_deadlocks`, which this must not weaken — see
+    # below). A *resumption*, by contrast, gets `resume_drain_ticks` real ticks, precisely
+    # because it already proved it belongs to this scheduler once.
+    #
+    # `agentdx.run()` — this coroutine — *is* the scheduler's root task. Its own first
+    # dispatch has to get from here, through whatever `_invoke(graph, payload)` below does, to
+    # this SDK's own first `spawn()`/`join()` call (`sdk/langgraph.py::run_node_async`, for the
+    # graph's first node) — and unlike a node body, which starts executing user code directly,
+    # root's path there runs through LangGraph's own Pregel/`ainvoke()` entry machinery first.
+    # That machinery is real, third-party async ceremony this codebase does not control —
+    # the same class of `@shielded` callback overhead `_resume_task`'s own docstring already
+    # documents as needing several real ticks to settle on a *resumption* — and on real
+    # hardware it does not reliably finish inside root's single first-dispatch tick (found via
+    # a real Python 3.12 `DeadlockError` on `fixtures/code_pipeline` +
+    # `fixtures/tasks/refactor_module.md`, empty wait_reason on the root task, RuntimeWarning
+    # that `_run_node_body`'s coroutine was never awaited — root never even reached its own
+    # first `spawn()`. Did not reproduce on a Python 3.10 sandbox; see ADR-021 for the full
+    # trace of how a blanket "grant root's first dispatch drain-tick grace" fix was tried
+    # first and rejected, because it silently broke the decisive control above by giving
+    # *any* root-level suspension on unmanaged concurrency enough real ticks to just happen
+    # to resolve on its own — exactly the non-determinism D-62's suspension contract exists
+    # to forbid).
+    #
+    # The fix is not to weaken root's first-dispatch tolerance — it is to make sure root has
+    # *already* reached one scheduler-recognised checkpoint (a `yield_point`) before it ever
+    # enters LangGraph's own machinery, so that entry happens on a *resumption*, which already
+    # safely tolerates exactly this class of real, side-effect-free async settling. This one
+    # call, always taken, always at the same point, adds exactly one additional
+    # `schedule_decision` at the very start of every run's log (I1: still fully deterministic
+    # — it is unconditional, carries no branch on task/graph content, and every replay of the
+    # same seed/scenario/graph takes it identically).
+    await context.scheduler.yield_point("sdk_run_entry")
+
     payload = {"task": task} if graph_input is None else graph_input
     status = "complete"
     output: object = None
