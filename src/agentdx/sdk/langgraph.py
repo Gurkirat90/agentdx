@@ -674,14 +674,34 @@ class LangGraphAdapter:
         executor, a different concurrency model this pass does not touch; none of the three
         reference fixtures use a sync node (confirmed: `fixtures/{code_pipeline,
         research_fanout,support_triage}/graph.py` define every node `async def`).
+
+        **`begin_call`/`end_call` (ADR-018, task #25).** This method is itself reached
+        directly from Pregel, not from a task this scheduler spawned — and when a superstep
+        has two or more ready nodes, Pregel dispatches each concurrently via its own hidden
+        `asyncio.Task`, none of them known to this scheduler. Without `begin_call`, every
+        such concurrent call to `spawn`/`join` below would resolve the *same* ambient caller
+        identity (whatever `SchedTaskContext` happened to be copied into each hidden task at
+        creation) and collide — confirmed on the real `fixtures/code_pipeline` fixture
+        (`planner -> {coder, reviewer}`), see `CONTEXT.md` §13's 2026-09-03 audit.
+        `begin_call` mints this specific call a private identity before `spawn`/`join` are
+        reached; `end_call`, in `finally`, always retires it — including on the exception
+        path, so a node body's own failure still closes out this call's bookkeeping and
+        never leaves anything for `_scheduler_loop`'s `_has_remaining_tasks` to wait on
+        forever.
         """
         run = self.require_run()
         agent_id = self.agent_from(node_name)
-        task_id = run.scheduler.spawn(
-            self._run_node_body(run, node_name, agent_id, base, bound, node_input, config, kwargs),
-            agent_id=agent_id,
-        )
-        return await run.scheduler.join(task_id)
+        call_id = run.scheduler.begin_call(agent_id=agent_id)
+        try:
+            task_id = run.scheduler.spawn(
+                self._run_node_body(
+                    run, node_name, agent_id, base, bound, node_input, config, kwargs
+                ),
+                agent_id=agent_id,
+            )
+            return await run.scheduler.join(task_id)
+        finally:
+            run.scheduler.end_call(call_id)
 
     async def _run_node_body(
         self,

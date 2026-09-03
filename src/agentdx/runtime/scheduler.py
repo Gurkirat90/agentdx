@@ -55,7 +55,13 @@ from agentdx.events.schema import (
 from agentdx.events.validators import validate_event
 from agentdx.events.writer import EventWriter
 from agentdx.runtime.clock import VirtualClock, wall_time
-from agentdx.runtime.context import SchedTaskContext, use_task
+from agentdx.runtime.context import (
+    SchedTaskContext,
+    active_task,
+    bind_task,
+    unbind_task,
+    use_task,
+)
 from agentdx.runtime.determinism import (
     DeterminismGuard,
     LeakReport,
@@ -64,6 +70,11 @@ from agentdx.runtime.determinism import (
 )
 
 if TYPE_CHECKING:
+    # Type-only: annotates `_call_tokens` (`begin_call`/`end_call`, ADR-018). `bind_task`/
+    # `unbind_task` are imported for real, at runtime, above — only the `Token` type itself
+    # is import-time-only.
+    from contextvars import Token
+
     # Type-only: never called. A runtime `random.*` call outside determinism.py/clock.py
     # is what scripts/check_determinism_hygiene.py's BANNED_MODULES bans (AGENTS.md §4.1);
     # naming the class for an annotation, inside a block that never executes, is not one.
@@ -559,6 +570,19 @@ class Scheduler:
         # A join'd-on task may have several waiters; a waiter joins exactly one task at a
         # time (join() is not re-entrant against the same caller).
         self._joiners: dict[str, list[str]] = {}
+        # call_id -> the contextvars Token to restore on end_call (ADR-018, D-62 fan-out
+        # fix, task #25). See begin_call/end_call.
+        self._call_tokens: dict[str, Token[SchedTaskContext | None]] = {}
+        # task_id -> the real asyncio.Task that legitimately holds that ambient identity
+        # (ADR-018). Populated once per identity: by _drive_coro, for every normal
+        # spawn()-ed task, and by begin_call, for every identity IT mints. begin_call reads
+        # this to tell "the current real asyncio.Task IS the one that owns the identity it
+        # inherited" (an inline continuation — e.g. Pregel's own single-node fast path,
+        # calling run_node_async directly, same call stack as its caller) from "a
+        # *different* real asyncio.Task merely inherited a copy of someone else's identity"
+        # (Pregel's fan-out path, concurrent hidden tasks) — see begin_call's docstring for
+        # why this distinction, found empirically, is the actual fix.
+        self._identity_owners: dict[str, asyncio.Task[object]] = {}
         # Captured in run(), before asyncio.sleep is patched to virtual. _resume_task
         # uses this — never the module-level asyncio.sleep — to yield to the real event
         # loop for one tick; the module-level name is the *patched* one for the duration
@@ -848,6 +872,170 @@ class Scheduler:
         self._tasks[task_id] = task
         return task_id
 
+    def begin_call(self, *, agent_id: str) -> str:
+        """Mint a private scheduler identity for one call into `spawn`/`join`, if needed.
+
+        Only when the caller genuinely needs one. Returns a ``call_id``; pass it to
+        `end_call` exactly once, in a ``finally`` block, when the call is finished. An empty
+        string is a valid, meaningful return — see "The no-op case" below — not an error.
+
+        **Why this exists (ADR-018, D-62 Option B fan-out fix, task #25).** `join`
+        identifies its caller ambiently, via `runtime.context.current_task()` — necessary
+        because `join` is reached from arbitrary call depth and has no `caller_id`
+        parameter to thread through (the same reasoning `runtime/context.py` gives for
+        `yield_point`). That ambient lookup is correct for a task this scheduler itself
+        spawned and drove through `_drive_coro`, which binds a fresh `SchedTaskContext`
+        exactly once, at the outermost level, before the task's body runs.
+
+        Option B's `sdk/langgraph.py::run_node_async` is not always reached that way.
+        LangGraph's own Pregel executor calls it directly, and when a superstep has two or
+        more ready nodes, Pregel dispatches each via its **own** hidden `asyncio.Task`
+        (`PregelRunner.atick`'s `self.submit()` path) — not through `spawn`. Every one of
+        those hidden tasks inherits the *same* `SchedTaskContext` its parent had ambient at
+        the moment of creation (ordinary `contextvars.Context` copy-on-`Task`-creation
+        semantics), because nothing rebinds it per Pregel-created task. Two or more
+        concurrent `run_node_async` calls therefore all resolved `current_task()` to the
+        *same* task_id — typically the root task's — and collided: `join`'s
+        `self._task_futures[caller_id]` has one slot per task_id, so the second concurrent
+        call's Future silently replaced the first's, permanently orphaning it. (Confirmed on
+        the real `fixtures/code_pipeline` fixture, which fans out `planner -> {coder,
+        reviewer}`; see the 2026-09-03 audit in `CONTEXT.md` §13 for the full trace.)
+
+        **The no-op case — found empirically, not designed in up front.** A first version of
+        this method minted a fresh identity *unconditionally*, on every call. That broke the
+        sequential case it was never meant to touch: Pregel's single-ready-node fast path
+        calls `run_node_async` **inline**, as the direct continuation of whichever task is
+        already driving `graph.ainvoke()` (typically root) — no hidden task, same real
+        `asyncio.Task` throughout. Minting a fresh identity there still rebinds the ambient
+        context away from that task, so its `spawn`/`join` calls resolve to the *new*
+        identity instead — and the *original* task's own `Task.state` is then never touched
+        again by anything, stuck at `RUNNING` forever, invisible to `_collect_runnable`
+        (which only considers `PENDING`/`RUNNABLE`). Once nothing else is left runnable, the
+        scheduler deadlocks — confirmed by trace: `DeadlockError` fired with only that one
+        task listed, *before* any concurrently-dispatched sibling ever ran a single line.
+
+        The fix is `self._identity_owners`: `_drive_coro` records, once, which real
+        `asyncio.Task` legitimately owns each identity it binds. `begin_call` compares
+        `asyncio.current_task()` — the real task calling *right now* — against the owner on
+        record for whatever identity is currently ambient. Same real task (the inline case)
+        → this call needs no identity of its own; return `""` and change nothing, so
+        `spawn`/`join` resolve exactly as they always did, correctly, against the task that
+        was already there. Different real task (the fan-out case, a Pregel-created hidden
+        task that merely inherited a *copy* of someone else's ambient context) → mint a
+        fresh `Task` and identity, exactly as the original design intended, and record this
+        new identity's own owner for any further nesting.
+
+        **The minted `Task`, when one is minted, is not driven by `_drive_coro`.** It
+        represents work already running on the real Python call stack (Pregel's own hidden
+        task), not a coroutine the scheduler's own loop should start — so it is created
+        directly in `TaskState.RUNNING`, `_collect_runnable` never picks it up for a first
+        dispatch, and no `schedule_decision` is emitted for its creation — correctly: no
+        scheduling choice was made here, Pregel decided to make this call, exactly as
+        ADR-017 already says Pregel keeps deciding *what* runs. Its placeholder `coro` is a
+        no-op, closed immediately so CPython never warns "coroutine was never awaited". If
+        the call later reaches `join` and blocks, the minted task moves `RUNNING` ->
+        `BLOCKED` exactly like any other caller; when its target completes it is woken
+        `BLOCKED` -> `RUNNABLE` and *then* genuinely competes for `_choose` like any other
+        runnable task — so which of several concurrently-ready continuations proceeds next
+        becomes a real, seeded scheduling decision, not an accident of which real asyncio
+        Task the event loop happened to wake first. This is what makes G2/G3 hold for real
+        fan-out rather than only for the synthetic harness
+        `test_pregel_reducer_write_order_is_deterministic.py` already checked.
+
+        Must always be paired with `end_call`, even on an exception (a ``finally`` block) —
+        for the minted case, `_scheduler_loop`'s `_has_remaining_tasks` waits for *every*
+        task in `self._tasks` to reach `DONE`, this one included; an unpaired `begin_call`
+        would hang the run after root itself finishes, waiting on a task nothing will ever
+        complete. `end_call("")` (the no-op case) is always safe and does nothing.
+
+        **Status, 2026-09-03: this closes the identity collision only, not fan-out itself.**
+        With only this fix, a fan-out superstep's spawned node-body tasks never actually get
+        dispatched — `_scheduler_loop` cannot reach a fresh `_collect_runnable` while the
+        parent (e.g. root) is mid-resumption and stuck on Pregel's own raw
+        `asyncio.gather`/`asyncio.wait`, since nothing about that raw await touches the
+        parent's own `Task.state`. A follow-up attempt (blocking the parent while fan-out
+        calls are outstanding, then waking it once they finish) fixed dispatch but broke
+        completion the other way — the parent's own coroutine, never actually suspended on
+        a scheduler Future in the first place, cannot safely be re-dispatched by the
+        scheduler at all. See the design note this prompted (`d62-fanout-dispatch.md`) for
+        the full trace and candidate fixes for `_scheduler_loop` itself — none chosen yet.
+
+        Args:
+            agent_id: The agent this call is made on behalf of (same as the `spawn`/`join`
+                calls it wraps). Ignored in the no-op case.
+
+        Returns:
+            An opaque, non-empty ``call_id`` if a fresh identity was minted, or ``""`` if
+            this call needs none. Pass whichever it returns to `end_call`.
+        """
+        current_ctx = active_task()
+        current_real_task = asyncio.current_task()
+        if current_ctx is not None and current_real_task is not None:
+            owner = self._identity_owners.get(current_ctx.task_id)
+            if owner is current_real_task:
+                # Inline continuation of a task that already owns this identity — nothing
+                # to protect here. See "The no-op case" above.
+                return ""
+
+        seq = self._task_seq_counter.get(agent_id, 0)
+        self._task_seq_counter[agent_id] = seq + 1
+        call_id = _make_task_id(self._run_id, agent_id, seq)
+        placeholder = _inert_call_body()
+        placeholder.close()  # never driven; see docstring above
+        task = Task(
+            task_id=call_id,
+            agent_id=agent_id,
+            task_seq=seq,
+            coro=placeholder,
+            state=TaskState.RUNNING,
+        )
+        self._tasks[call_id] = task
+        ctx = SchedTaskContext(task_id=call_id, agent_id=agent_id)
+        self._call_tokens[call_id] = bind_task(ctx)
+        if current_real_task is not None:
+            self._identity_owners[call_id] = current_real_task
+        return call_id
+
+    def end_call(self, call_id: str) -> None:
+        """Close the call started by `begin_call`.
+
+        Must be called exactly once, always (a ``finally`` block — see `begin_call`),
+        regardless of whether the call raised.
+
+        If `call_id` is ``""`` (the no-op case — `begin_call` determined this call needed no
+        identity of its own), this is a no-op too: nothing was minted or rebound, so there
+        is nothing to restore or retire.
+
+        Otherwise: restores the ambient scheduler task to whatever it was before the
+        matching `begin_call`, retires the minted task's ownership record, then retires the
+        task itself exactly as `_drive_coro` retires a normal spawned task: state -> `DONE`,
+        its own pending Future (if any — e.g. it was itself mid-`join` when this fired, on
+        an exception path) resolved so nothing waits on it forever, and any of *its* joiners
+        woken. In practice nothing joins a `begin_call` task today (only `run_node_async`
+        calls `begin_call`, and it never hands `call_id` to anyone), but this mirrors
+        `_drive_coro`'s finally block exactly rather than assuming that stays true.
+
+        Args:
+            call_id: The id `begin_call` returned — `""` or a minted call_id, both valid.
+        """
+        if not call_id:
+            return
+        self._identity_owners.pop(call_id, None)
+        token = self._call_tokens.pop(call_id, None)
+        if token is not None:
+            unbind_task(token)
+        task = self._tasks.get(call_id)
+        if task is None or task.state is TaskState.DONE:
+            return
+        task.state = TaskState.DONE
+        fut = self._task_futures.pop(call_id, None)
+        if fut is not None and not fut.done():
+            fut.set_result(None)
+        for joiner_id in self._joiners.pop(call_id, []):
+            joiner = self._tasks.get(joiner_id)
+            if joiner is not None and joiner.state is TaskState.BLOCKED:
+                joiner.state = TaskState.RUNNABLE
+
     # ------------------------------------------------------------------
     # Stamping (delegates to the recorder — the single stamping boundary)
     # ------------------------------------------------------------------
@@ -1077,8 +1265,19 @@ class Scheduler:
 
         This wrapper exists so we can catch the return value and exception from a
         coroutine that is running as an asyncio Task, not directly awaited.
+
+        Also records, in `self._identity_owners`, that *this* real `asyncio.Task` — the one
+        `_drive_coro` itself is now running as, since it was reached via
+        ``asyncio.ensure_future(self._drive_coro(task))`` — is the legitimate owner of
+        ``task``'s identity for as long as it runs (ADR-018, D-62 fan-out fix). This is what
+        lets `begin_call` tell "code running inline, on this same real task" from "code
+        running on a different real task that merely inherited a copy of this ambient
+        context" (Pregel's own hidden fan-out tasks).
         """
         ctx = SchedTaskContext(task_id=task.task_id, agent_id=task.agent_id)
+        owner = asyncio.current_task()
+        if owner is not None:
+            self._identity_owners[task.task_id] = owner
         with use_task(ctx):
             try:
                 task.result = await task.coro
@@ -1089,6 +1288,7 @@ class Scheduler:
                 self._fault_hook.on_task_done(task.task_id, None)
             finally:
                 task.state = TaskState.DONE
+                self._identity_owners.pop(task.task_id, None)
                 # If the task is still in the futures map, resolve it so nobody waits forever.
                 fut = self._task_futures.pop(task.task_id, None)
                 if fut is not None and not fut.done():
@@ -1266,6 +1466,19 @@ class Scheduler:
 # ---------------------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------------------
+
+
+async def _inert_call_body() -> None:
+    """Placeholder ``Task.coro`` for a `Scheduler.begin_call`-minted task (ADR-018).
+
+    Never awaited — `begin_call` calls `.close()` on the coroutine object this produces
+    immediately after construction, so CPython never emits a "coroutine was never awaited"
+    warning. Exists only so the minted `Task` satisfies the dataclass's required `coro`
+    field; `_drive_coro` never reaches it, because a `begin_call` task is created directly
+    in `TaskState.RUNNING` and so never takes the `PENDING` -> picked -> first-dispatch path
+    that would call it.
+    """
+    return None
 
 
 def _make_task_id(run_id: str, agent_id: str, task_seq: int) -> str:

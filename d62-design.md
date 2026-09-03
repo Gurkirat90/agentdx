@@ -215,3 +215,177 @@ kept rather than rewritten so the reasoning stays visible.
 D-78 (`run_id` collision) is independent and blocks G9 on its own — see `d78-plan.md`.
 G10 has a **second** independent failure beyond D-62: the one cold measurement, 181.092 s,
 exceeds the 180 s threshold. Closing D-62 does not close G10.
+
+---
+
+## 8. The fan-out dispatch gap (2026-09-03) — found implementing Option B, task #25
+
+**Status: design only again, on one narrow question. Everything else in this section is
+built, validated, and additive.** §4-§6 are unaffected: Option B is still the right choice,
+`resume_drain_ticks` (§3-era finding) is still correct and unchanged, and nothing here
+argues for reopening Option A or D as the *default* path — §8.4 below revisits Option A
+only because this section's own finding changes its cost/benefit slightly, not because
+anything else about it changed.
+
+### 8.1 Where this picks up
+
+Attempting D-62 Option B's own Step 4 (a real fixture, end-to-end, not the synthetic
+sequential test graph `tests/unit/sdk/graphs.py::build_pipeline`) found that **all three**
+reference fixtures fan out (`fixtures/code_pipeline/graph.py` itself is
+`planner -> {coder, reviewer} -> tester` — this was wrongly believed sequential earlier the
+same day) and all three hit a bug `resume_drain_ticks` does not touch: `join`'s ambient
+caller-identity resolution collides the moment Pregel dispatches two or more ready nodes
+concurrently in one superstep (`PregelRunner.atick`'s `self.submit()` path, one hidden
+`asyncio.Task` per node, none of them `spawn`ed by this scheduler — every one inherits the
+*same* `SchedTaskContext` its parent had ambient, by ordinary `contextvars` copy-on-`Task`-
+creation). A full staff-engineer-style audit of this (delta table, root cause classified
+**(c)** — a genuine gap in this document's own §4/§5, silently filled by code reusing
+machinery built for the scheduler's single-cooperative-task case) is recorded in
+`CONTEXT.md` §13, 2026-09-03. The owner approved building the audit's "candidate 2":
+give each `run_node_async` call its own scheduler identity when it needs one, via two new
+`Scheduler` methods, `begin_call`/`end_call` (ADR-018).
+
+### 8.2 What's built and validated
+
+`runtime/context.py` gains `bind_task`/`unbind_task` (a raw, non-context-manager pair
+alongside the existing `use_task`, needed because `begin_call`/`end_call` straddle a
+caller-owned `try`/`finally` around an ordinary function call, not one lexical `with`
+block). `runtime/scheduler.py`'s `Scheduler` gains `begin_call`/`end_call` and
+`self._identity_owners` (which real `asyncio.Task` legitimately owns each bound identity,
+recorded once by `_drive_coro`). `sdk/generic.py` widens the `Scheduler` Protocol to match
+(`ImmediateScheduler`'s versions are no-ops — it never had this problem, since its `join`
+resolves its target directly from `task_id`, never from an ambient caller identity).
+`sdk/langgraph.py::run_node_async` wraps its existing `spawn`/`join` call in
+`begin_call`/`end_call`.
+
+**The mechanism, corrected once already, empirically.** A first version minted a fresh
+identity on *every* `begin_call`, unconditionally. That broke the sequential case
+`resume_drain_ticks` already fixed: Pregel's single-ready-node fast path calls
+`run_node_async` **inline** — same real `asyncio.Task` as whichever task is already driving
+`graph.ainvoke()` (typically root), no hidden task at all. Minting a fresh identity there
+still rebinds the ambient context away from that task, so its own `spawn`/`join` calls
+start resolving against the *new* identity instead — and the *original* task's own
+`Task.state` is then never touched by anything again, stuck at `RUNNING` forever, invisible
+to `_collect_runnable`. Confirmed by trace: `DeadlockError`, only that one task listed,
+*before* any concurrently-dispatched sibling ever ran a single line. The fix:
+`self._identity_owners` — `begin_call` compares `asyncio.current_task()` (the real task
+calling *right now*) against the recorded owner of whatever identity is currently ambient.
+Same real task → no-op, return `""`, change nothing (restores the original, working
+sequential behaviour exactly). Different real task → mint a fresh identity, as originally
+intended.
+
+**Validated two ways.** The full existing suite is unaffected — 2131 passed, 0 failed,
+identical to the pre-this-fix baseline (this is purely additive: nothing existing calls
+`begin_call`/`end_call` except the one new call site). And empirically, against a harness
+built to mirror Pregel's own two dispatch paths directly against the real `Scheduler` (not
+`ImmediateScheduler`): a root that runs one sequential node via `begin_call`+`spawn`+`join`
+(mirroring the fast path), then fans out into two concurrent, real, raw `asyncio.Task`s
+(mirroring `self.submit()`) each independently calling `begin_call`+`spawn`+`join`. The
+sequential call correctly took the no-op path. The two concurrent calls correctly minted
+distinct identities — no collision, no orphaned Future, no cross-talk between coder's and
+reviewer's own bookkeeping.
+
+**This closes the identity collision. It does not, on its own, let a fan-out superstep's
+node bodies actually run.** That is §8.3.
+
+### 8.3 What's still open: the dispatch gap itself
+
+**First finding — the spawned bodies are never dispatched at all.** `_scheduler_loop`
+drives exactly one task at a time: `while ...: runnable = self._collect_runnable(); chosen
+= self._choose(runnable); await self._resume_task(chosen)`. `_resume_task`'s resumption
+drain loop (the `resume_drain_ticks` mechanism) grants the *already independently running*
+background task (root's own, since its first dispatch) extra real ticks — it does not, and
+architecturally cannot without change, drive `_scheduler_loop`'s own *next* iteration,
+because that next iteration cannot start until the *current* `await self._resume_task(root)`
+call returns. Root's own coroutine, mid-fan-out, is stuck on a raw `asyncio.gather`/
+`asyncio.wait` over Pregel's own hidden tasks — nothing about that raw await ever touches
+`self._tasks['root'].state`, so it stays `RUNNING` for the *entire* drain window. The two
+fanned-out calls' own spawned node-body tasks sit `PENDING` in `self._tasks` the whole
+time — real, correctly-identified, entirely inert — because `_scheduler_loop` never gets a
+turn to pick them up. Confirmed by trace: root's drain exhausts its full
+`resume_drain_ticks` budget and raises `SchedulerError`, having made zero progress on
+either spawned body; a probe with a smaller/no prior sequential step instead hits
+`_scheduler_loop`'s own `DeadlockError` immediately, before either hidden task runs a
+single line.
+
+**Second finding — naively unblocking the parent breaks completion the other way.** A
+follow-up attempt had `begin_call` flip the parent (root) to `BLOCKED` while any call
+minted against it is outstanding (reference-counted, since a superstep can fan out to more
+than two) — this *worked* for dispatch: `_resume_task(root)`'s drain loop correctly exits
+the moment root is `BLOCKED`, `_scheduler_loop` regains control, and the two node-body
+tasks get dispatched, run, and complete completely normally. Confirmed by trace: both
+`join()` calls returned real results, and root's own `asyncio.gather` resolved with both —
+**the fan-out itself completed correctly.** The bug is in the other half: `end_call`, once
+every sibling reaches it, flipped the parent back to `RUNNABLE` — but root's own real
+coroutine was *never* suspended on anything the scheduler tracks in the first place (it's
+suspended on Pregel's own `asyncio.gather`, not a `join`/`sleep`/`yield_point` Future); it
+keeps running independently the entire time and reaches `DONE` on its own, through the
+*existing* `_drive_coro` completion path, whenever its own `await` actually resolves.
+Flipping it to `RUNNABLE` makes `_scheduler_loop` try to dispatch it *again* — and
+`_resume_task`, finding no stored Future for it, takes the *first-dispatch* branch:
+`asyncio.ensure_future(self._drive_coro(task))`, which tries to `await task.coro` on a
+coroutine object that is already being (or already was) awaited. Confirmed by trace:
+`RuntimeError: coroutine is being awaited already`, arriving *after* root's own
+"gather returned" line — i.e., after the real work had already, correctly, finished; the
+crash is purely in the redundant re-dispatch.
+
+**The question underneath both.** `_scheduler_loop`'s deadlock check —
+`if not runnable: if not self._timers: raise DeadlockError(...)` — is synchronous and
+unconditional the moment `_collect_runnable` comes back empty. It has no notion of "a task
+that is `BLOCKED`, and so invisible to `_collect_runnable`, may still be independently
+progressing right now, on real concurrency (Pregel's own hidden tasks) it does not need the
+scheduler's cooperation to finish, and finding out one way or the other costs nothing more
+than a real tick." Both halves of this — getting the scheduler's *own* newly-spawned tasks
+(the node bodies) dispatched while the parent's drain window is open, and correctly judging
+when it is safe to simply leave the parent alone rather than either declaring deadlock too
+eagerly or wrongly re-driving it — trace back to this one gap.
+
+### 8.4 Candidate directions — none chosen
+
+**Candidate α — teach the resumption drain loop to also dispatch other runnable tasks.**
+On each drain tick, in addition to checking the drained task's own state, also check
+`_collect_runnable()` (excluding that task) and dispatch anything else pending, before
+re-checking. Turns the drain loop into a small, nested scheduling loop rather than a
+passive wait.
+*Gets:* `_scheduler_loop`'s own top-level loop and its `DeadlockError` condition stay
+untouched; no new bookkeeping on `Task.state` at all, so no parent block/wake mechanics to
+get wrong a third time.
+*Costs:* a genuinely nested dispatch path needs its own determinism argument — does
+dispatching a sibling from inside another task's drain loop still produce the same
+`schedule_decision` sequence regardless of real timing? That is exactly the kind of claim
+`test_pregel_reducer_write_order_is_deterministic.py` exists to check for `apply_writes`,
+and this would need its own equivalent, not an assumption. Reentrancy also needs thinking
+through: a dispatched sibling that itself fans out (nested subgraphs) nests the drain loop
+again.
+
+**Candidate β — give the deadlock check a grace period for backgrounded work.** Formalize
+what §8.3's second attempt was reaching for: a task can be `BLOCKED`-and-known-to-be-
+independently-active, and `_scheduler_loop`'s deadlock check grants such a task real ticks
+(bounded, the same shape `resume_drain_ticks` already uses) before concluding deadlock,
+rather than raising immediately — but, unlike that attempt, *never* re-dispatches the
+parent through `_resume_task` at all; it simply lets `_drive_coro`'s own existing
+completion path reach it in its own time.
+*Gets:* closest in shape to what was actually tried, this time without the redundant-
+dispatch bug.
+*Costs:* touches `_scheduler_loop`'s deadlock condition directly — the highest-blast-radius
+option here, on file this module's own docstring calls "the whole product" for I1. Needs
+its own decisive experiment before anyone trusts it, the same discipline §3's own
+measurement got.
+
+**Candidate γ — revisit Option A in light of this, not on the original grounds.** §4
+rejected Option A (the scheduler drives Pregel superstep-by-superstep) for reaching into
+Pregel's non-public step API — that cost is unchanged and this finding does not revisit it.
+What *is* new: both dispatch problems in §8.3 exist *because* Option B leaves Pregel in
+charge of concurrency the scheduler itself never creates. Option A would not have either
+bug, by construction — the scheduler would decide when each fanned-out branch proceeds
+directly, never handing control to a hidden Pregel-created task at all. Recorded because
+the *shape* of the problem this section found is evidence relevant to that original
+trade-off, not because the trade-off's price (LangGraph internal-API coupling) has changed.
+
+### 8.5 What this does not touch
+
+D-78 and G10's second failure are exactly as §7 already states — unaffected by anything in
+this section. ADR-018 (`begin_call`/`end_call`, §8.2) stands regardless of which candidate
+above is eventually chosen or built: none of them require reverting it, since the identity
+collision it closes is a real, separate bug from the dispatch gap, found first, fixed first,
+and orthogonal to how the dispatch gap is eventually resolved.

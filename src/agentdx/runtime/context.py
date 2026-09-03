@@ -126,10 +126,31 @@ def use_task(task: SchedTaskContext) -> Iterator[SchedTaskContext]:
         _CURRENT_TASK.reset(token)
 
 
+def bind_task(task: SchedTaskContext) -> Token[SchedTaskContext | None]:
+    """Bind `task` as the ambient scheduler task.
+
+    Caller must pass the returned token to `unbind_task` exactly once, in a `finally`
+    block. Raw, unbound-lifetime half of `use_task` — added for `Scheduler.begin_call`/`end_call`
+    (D-62 Option B fan-out fix, task #25), whose bind and unbind straddle a caller-owned
+    `try`/`finally` around an ordinary async function call (`sdk/langgraph.py::
+    run_node_async`), not a single lexical `with` block a generator-based context manager
+    could wrap. Prefer `use_task` at any call site that *can* use a `with` block — this pair
+    exists only because that one caller cannot.
+    """
+    return _CURRENT_TASK.set(task)
+
+
+def unbind_task(token: Token[SchedTaskContext | None]) -> None:
+    """Undo a `bind_task` call. See `bind_task`."""
+    _CURRENT_TASK.reset(token)
+
+
 __all__ = [
     "SchedTaskContext",
     "TaskContextError",
     "active_task",
+    "bind_task",
     "current_task",
+    "unbind_task",
     "use_task",
 ]

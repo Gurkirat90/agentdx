@@ -286,6 +286,14 @@ class Scheduler(Protocol):
     `d62-design.md` §2-3 — an unrecognised suspension deadlocks it). `join` was not in
     ADR-017's original two-method sketch; it was found necessary while wiring `run_node_async`
     and is the same kind of Protocol addition, not a separate decision.
+
+    **`begin_call`/`end_call` added by ADR-018 (same D-62 Option B work, task #25).**
+    `spawn`/`join` alone assume each concurrently-executing call into them already has a
+    correct, distinct ambient caller identity — true for a task this scheduler spawns and
+    drives itself, false for `run_node_async`, which LangGraph's own Pregel executor can
+    invoke directly and concurrently (its own fan-out dispatch, one hidden `asyncio.Task`
+    per ready node, none `spawn`ed by this scheduler). `begin_call`/`end_call` let an
+    implementation mint a private identity for such a call.
     """
 
     async def yield_point(self, reason: str) -> None:
@@ -314,6 +322,42 @@ class Scheduler(Protocol):
         node body's failure surfaces at the `join` call site exactly as if it had been
         awaited inline — spawning must not change what a node's own exception looks like
         to its caller.
+        """
+        ...
+
+    def begin_call(self, *, agent_id: str) -> str:
+        """Mark the start of one logical call into `spawn`/`join`.
+
+        For code the scheduler did not itself dispatch. Returns an opaque `call_id`; pass
+        it to `end_call` exactly once, in a `finally` block, when the call is finished.
+
+        **Added by ADR-018 (D-62 Option B fan-out fix, task #25).** `join` identifies its
+        caller ambiently (there is no `caller_id` parameter to thread through — the same
+        reasoning `yield_point` already has no way to name its caller either). That is
+        correct as long as each concurrently-executing call into `spawn`/`join` has its own
+        ambient identity. It stopped being true once `run_node_async` could be invoked
+        directly, and concurrently, by LangGraph's own Pregel executor (a superstep with
+        two or more ready nodes dispatches each via its own hidden `asyncio.Task`, none of
+        them `spawn`ed by this scheduler) — every such hidden task inherits the *same*
+        ambient identity from its parent by ordinary `contextvars` copy-on-`Task`-creation,
+        so two concurrent callers collided. `begin_call`/`end_call` bracket a call so an
+        implementation that needs one (the real `runtime.scheduler.Scheduler`) can mint a
+        private identity for it; an implementation with no ambient-identity concept at all
+        (`ImmediateScheduler`) may make both a harmless no-op.
+
+        **Not every call needs a fresh identity — an implementation may return `""`** for a
+        call it determines is an inline continuation of a task that already owns the
+        identity it would otherwise inherit (e.g. Pregel's own single-node fast path, no
+        hidden task involved). `""` is a normal, meaningful result, not a sentinel for
+        failure — pass it to `end_call` exactly like any other return value.
+        """
+        ...
+
+    def end_call(self, call_id: str) -> None:
+        """Close the call started by `begin_call`.
+
+        Must be called exactly once, always, regardless of whether the call raised — see
+        `begin_call`. Safe (a no-op) if `call_id` is `""`.
         """
         ...
 
@@ -416,6 +460,7 @@ class ImmediateScheduler:
     """
 
     _tasks: dict[str, asyncio.Task[object]] = field(default_factory=dict)
+    _call_seq: list[int] = field(default_factory=lambda: [0])
 
     async def yield_point(self, reason: str) -> None:
         """Return without yielding. Named `reason` for parity with the real scheduler."""
@@ -449,6 +494,22 @@ class ImmediateScheduler:
             detail = f"join({task_id!r}) names a task ImmediateScheduler never spawned"
             raise SchedulerTaskError(detail)
         return await task
+
+    def begin_call(self, *, agent_id: str) -> str:
+        """No-op (ADR-018).
+
+        This scheduler has no ambient-identity concept for `spawn`/`join` to collide on in
+        the first place — `join` resolves its target directly from `task_id`, never from an
+        ambient caller identity — so there is nothing to protect here. Returns a fresh,
+        unique id purely for Protocol conformance with `end_call`.
+        """
+        n = self._call_seq[0]
+        self._call_seq[0] = n + 1
+        return f"immediate-call:{agent_id}:{n}"
+
+    def end_call(self, call_id: str) -> None:
+        """No-op — see `begin_call`."""
+        return
 
 
 @dataclass(frozen=True, slots=True)
