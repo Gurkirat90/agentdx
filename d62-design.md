@@ -477,3 +477,125 @@ including a schema change, but avoids `_scheduler_loop`'s deadlock condition" ag
 "stays in one module and one function, but touches the deadlock condition itself" or γ's
 "reopens an already-decided trade-off, but sidesteps this entire problem class by
 construction." No candidate is chosen as of this writing.
+
+### 8.7 Candidate β, built and validated (2026-09-03) — D-62 task #25 closed for real
+
+The owner reviewed §8.6 and picked β over a rescoped α or γ. Built the same day, validated
+against all three real fixtures end-to-end, and — unlike either α spike — it holds.
+
+**What was built.** Two pieces, both in `runtime/scheduler.py`, neither touching `self._step`,
+`_choose`, or the event schema. (1) `begin_call`'s mint branch (reached only when a *different*
+real `asyncio.Task` inherits a copy of someone else's ambient identity — the fan-out case ADR-
+018 already distinguishes from an inline continuation): if the task that identity belongs to
+(e.g. root) is currently `RUNNING`, flip it to `BLOCKED` and record it in a new
+`self._backgrounded: set[str]`. This is the "block" half the reverted attempt in §8.3 already
+proved works — `_resume_task`'s drain loop returns the moment its own task leaves `RUNNING`,
+handing control back to `_scheduler_loop`, which can then see and dispatch the newly
+`spawn()`-ed node body through its *ordinary* top-level path: one `_choose()` call per real
+turn, exactly as before this change. That is the structural difference from α: dispatching a
+fanned-out node body never becomes a second kind of scheduling decision, so `explore/`'s
+`decision_step` addressing (§8.6) is never in the blast radius at all — not fixed around,
+simply never reached. (2) Deliberately does **not** rebuild the "wake" half that broke the
+earlier attempt (`RuntimeError: coroutine is being awaited already`, §8.3). `end_call` is
+unchanged — no re-dispatch through `_resume_task`, ever. `_backgrounded` membership is instead
+cleared in `_drive_coro`'s own completion `finally` block, alongside its existing
+`_identity_owners` cleanup — i.e. only once the task's real, already-alive `asyncio.Task`
+(from its own first dispatch) genuinely reaches `DONE`, through the path that has always
+existed for that. `_scheduler_loop`'s deadlock branch is taught one new fact: when nothing is
+runnable and no timer exists, check `self._backgrounded` before declaring deadlock — a
+non-empty set means some task's own real background work may still be settling, so grant real
+ticks up to `resume_drain_ticks` (the same bound `_resume_task`'s own drain loop already uses)
+before concluding deadlock for real. A task that never went through `begin_call` — every
+existing D-62 deadlock test, `tests/integration/runtime/test_d62_suspension_contract.py`
+included — never enters `_backgrounded`, so that branch is unreached for them; their behaviour
+is byte-for-byte unchanged, confirmed by the full suite (below).
+
+**Validated against all three real fixtures, not a synthetic probe.** `code_pipeline`,
+`research_fanout` and `support_triage` all reach `run_end` with `status: complete` under the
+real `Scheduler`, for the first time in this project's history — confirmed by directly
+invoking the real `agentdx.cli.main.app` via `CliRunner`, `--cache-mode replay`, and reading
+the resulting SQLite event log back. `code_pipeline`: 56 events, `planner -> {coder, reviewer}
+-> tester` end-to-end, 7 tool calls recorded. **Determinism checked directly, not assumed:**
+two independent invocations of `code_pipeline` at the same seed produce event logs that are
+byte-identical across all 56 rows and every field — including every `schedule_decision`'s
+`chosen_task_id` — except `pid` (a documented volatile field, not part of the canonical
+projection, PRD §10.7).
+
+**Found, while validating, not caused by this change: a second, pre-existing bug.** All three
+fixtures, after completing at the scheduler level, then crashed identically in the CLI's own
+post-run analysis step: `TimingAnalysisError` (`E-ANLZ-001`), `resolve_container` in
+`analysis/timing.py` raising "span has no segments and no children to attach an event to" for
+`planner`'s own `agent_step` span. Confirmed via `git diff` that `analysis/timing.py` had zero
+prior changes from this session — genuinely pre-existing, simply never reachable before,
+because no real fan-out run had ever completed under the real `Scheduler` to feed
+`analyze_events` a log this shape. Root cause: `_segment_intervals` correctly reports zero
+gaps for a genuinely zero-width `agent_step` span (`planner`'s own span here — this whole
+fixture's virtual makespan is 0ms) — there is trivially no width to segment — but that is
+indistinguishable, by that function's own return value alone, from "this span has children
+that exactly cover it, delegate to the nearest one" (`resolve_container`'s existing, correct
+fallback) when the span in fact has **no children at all**: `planner` does one `state_write`
+and nothing nested, and `sdk/langgraph.py::deliver_edges` deliberately stamps a
+`message_send`'s `span_id` with the *producer's* span even though the send is recorded once
+the *consumer* starts — after the producer's own span has already closed. `resolve_container`
+had no node to resolve that message to. **Fixed** in `build_timing_dag`'s segment-building
+loop: when `_segment_intervals` returns no gaps *and* the span has no children at all,
+synthesize its own whole (possibly zero-width) interval as a single segment, so a real
+`TimingNode` exists for `resolve_container` to find — four lines, scoped to exactly this
+condition, leaving the "children exist and cover it" and "children exist with a real gap"
+cases untouched. Re-verified against all three fixtures: `agentdx run` now exits 0 for each,
+end to end, `verdict` computed, `Bounded search:` coverage line printed — the full pipeline,
+not just the scheduler.
+
+**Test fallout, all resolved.** `tests/integration/cli/test_exit_codes.py`'s own
+`test_exit_5_internal_error_on_a_real_scheduler_deadlock` asserted, by its own docstring, that
+`code_pipeline`'s fan-out "is not reachable by the scheduler's cooperative loop" — no longer
+true. Converted to the same `monkeypatch`-`_execute_one` substitution the file's other four
+exit-code tests already use (a real scheduler deadlock is no longer something any fixture in
+this repo reaches by actually running), module docstring corrected to explain why. Two
+acceptance-gate docstrings (`tests/acceptance/__init__.py`, `tests/acceptance/test_gates.py`'s
+G1/G9) also cited the now-fixed deadlock as G1's blocker — corrected to the real, separate,
+pre-existing reason G1 stays red: `agentdx run` has no `--assert` option at all (PRD §44.1's
+literal G1 command uses one), the same class of gap G4's own docstring already documents.
+**Not attempted:** adding `--assert`, or otherwise verifying G1 itself now passes — this
+sandbox has no Python ≥3.12 and no `agentdx` console script on `PATH` to run the gate's real
+subprocess command with (confirmed: `pip install -e .` refuses on the Python version), the
+same standing limitation every acceptance-gate row in this ledger has carried. Whether G1
+passes once `--assert` exists is owed to the owner on real hardware, not claimed here.
+
+**Verified end to end.** Full suite (`tests/api/` excluded from collection — that directory's
+`models.py` uses PEP 695 `type` statement syntax, which does not parse on this sandbox's
+Python 3.10.12 at all, the same standing `<3.12` gap noted throughout this file and CONTEXT.md):
+2136 passed, 1 failed, 13 deselected. The one failure is
+`tests/integration/cli/test_doctor.py::test_doctor_passes_on_a_healthy_setup` — `doctor`'s own
+`python-version` check correctly reports this sandbox's real Python (3.10.12) as outside the
+project's pinned `>=3.12,<3.13` range, which is a true, correct diagnosis of this sandbox, not
+a bug the test is catching. Confirmed unrelated to anything in this pass: `git diff` shows
+zero changes to `test_doctor.py`, `cli/commands/doctor.py`, or anything it imports; the failure
+reproduces identically run standalone, with no scheduler or timing code anywhere on its call
+path. Not silently excluded — reported here honestly, same class of `<3.12`-driven failure **D-66**
+(§9) already documents for this exact sandbox. `ruff check`/`format --check` clean on
+every touched file. `mypy --strict` clean on `runtime/scheduler.py`, `analysis/timing.py`,
+`tests/integration/cli/test_exit_codes.py`. `check_ledger.py` and `check_bench_markers.py`
+both OK. `tests/acceptance/` still collects all 10 gate tests cleanly.
+
+**What this closes.** D-62 task #25's dispatch gap (§8.3) is closed: `_scheduler_loop` now
+regains control during a fan-out superstep's drain window and dispatches the spawned node
+bodies through its ordinary path, without a second kind of scheduling decision and without
+touching the deadlock condition's own trigger for any run that never uses `begin_call`. All
+three reference fixtures complete end-to-end for the first time. Combined with ADR-018 (the
+identity fix, §8.2), D-62 Option B (ADR-017) is now fully realised: node bodies run as
+scheduler tasks, Pregel decides *what* runs, the scheduler decides *when* — for real,
+concurrent fan-out, not only the sequential case. β also incidentally exercised, and this
+section's own fix closed, a second and entirely unrelated pre-existing gap in
+`analysis/timing.py` that nothing before this session had ever reached.
+
+**What remains open, honestly.** No independent OP-2 has reviewed the β mechanism itself, the
+`_backgrounded`/deadlock-grace-period reasoning, or the `resolve_container` fix — this section
+is this session's own work, self-verified against real fixtures and the full suite, same
+standing caveat every module in this ledger carries. G1's real pass/fail status (once
+`--assert` exists) is unverified. The empirical validation above is real CLI runs read back
+from SQLite, not yet promoted into a tracked `tests/` file the way ADR-018's own mechanism was
+(`tests/unit/runtime/test_scheduler.py`'s "begin_call / end_call identity" section,
+`tests/integration/runtime/test_d62_fanout_dispatch.py`) — an equivalent for β (a decisive
+test proving dispatch through `_backgrounded` and the deadlock grace period, ideally against
+a real fixture rather than only a synthetic harness) is owed and not yet written.

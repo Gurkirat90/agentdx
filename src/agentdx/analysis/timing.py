@@ -468,6 +468,23 @@ def build_timing_dag(events: Sequence[Event]) -> TimingDAG:
             for cid in children.get(span_id, [])
         ]
         gaps = _segment_intervals(outer[0], outer[1], child_intervals)
+        if not gaps and not child_intervals:
+            # `_segment_intervals` correctly reports zero gaps for a genuinely zero-width
+            # span (`outer[0] == outer[1]`) — there is no interval width to segment. But
+            # that is indistinguishable, by that function's own contract, from "no
+            # children, so nothing to represent" only when there truly are no children at
+            # all: a childless agent_step span is still real activity (its own
+            # `state_write`/`state_read`/etc.), and `resolve_container` below needs a node
+            # to resolve later-recorded events against — concretely, `message_send`
+            # events, which `sdk/langgraph.py::deliver_edges` deliberately stamps with the
+            # *producer's* span_id even though the send is recorded once the *consumer*
+            # starts, after the producer's own span has already closed. Represent the
+            # span's own entire (possibly zero-width) interval as its own single segment
+            # rather than leaving it with no node at all. Found via `fixtures/code_pipeline`
+            # `planner`, a simple agent_step with one `state_write` and no nested spans —
+            # the first real fan-out run to ever complete under the real `Scheduler` and
+            # reach this analysis step (D-62 task #25, candidate beta, 2026-09-03).
+            gaps = [outer]
         segs: list[tuple[int, int, str]] = []
         for index, (seg_start, seg_end) in enumerate(gaps):
             seg_id = f"{span_id}#seg{index}"

@@ -194,13 +194,19 @@ def _run_gate(
 def test_g1_seeded_race_is_detected() -> None:
     """PRD §44.1 G1: `code_pipeline` yields >=1 `lost_update` race finding.
 
-    Known-red as of 2026-08-27 (CONTEXT.md §7, P17 row): `agentdx run` deadlocks on
-    `code_pipeline` because nothing in `sdk/` calls `Scheduler.spawn()` for LangGraph's
-    parallel fan-out (exit 5, not the assertion failure this command is meant to probe).
-    The underlying race-detection algorithm this gate is really about is independently
-    covered, off the CLI path, by `tests/analysis/race/test_gate_g1.py` against the
-    golden `code_pipeline` log — that is a different, narrower claim than this gate's
-    literal command, and this test does not substitute one for the other.
+    Known-red as of 2026-09-03 for a different reason than originally recorded. The scheduler
+    deadlock this docstring used to cite (nothing in `sdk/` called `Scheduler.spawn()`) is
+    fixed — ADR-017 wired `spawn()`/`join()`, and D-62 task #25's candidate beta closed the
+    dispatch gap that kept `code_pipeline` deadlocking after that (`d62-design.md` §8.7, ADR
+    pending); `agentdx run fixtures/code_pipeline` now completes end-to-end. This gate's own
+    literal command is still blocked, for an unrelated, pre-existing reason found while
+    checking that: `agentdx run` has no `--assert` option at all — the same class of gap G4
+    below already documents (a §44.1 command that is not a real CLI surface). Whether this
+    gate would pass once `--assert` exists is unverified. The underlying race-detection
+    algorithm this gate is really about is independently covered, off the CLI path, by
+    `tests/analysis/race/test_gate_g1.py` against the golden `code_pipeline` log — that is a
+    different, narrower claim than this gate's literal command, and this test does not
+    substitute one for the other.
     """
     _run_gate(
         "G1",
@@ -310,7 +316,8 @@ def test_g9_offline_demo() -> None:
     day against a real run (Python 3.12, real `just`, repo owner's machine): `just
     demo-offline` fails at exit 7, `"no scenario files found under fixtures/code_pipeline"`
     -- a fixture/scenario-resolution gap in `agentdx run`'s target handling, reached before
-    the previously-documented `sdk/`-spawn deadlock (G1) ever comes into play. This
+    whatever G1's own blocker is (a scheduler deadlock originally, the missing `--assert`
+    flag now -- see `test_g1_seeded_race_is_detected`) ever comes into play. This
     session's first guess (that G9 simply inherits G1's deadlock) was wrong; corrected here
     rather than left stale now that a real run exists to check it against.
     """

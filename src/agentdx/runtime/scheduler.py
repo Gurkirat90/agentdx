@@ -583,6 +583,13 @@ class Scheduler:
         # (Pregel's fan-out path, concurrent hidden tasks) — see begin_call's docstring for
         # why this distinction, found empirically, is the actual fix.
         self._identity_owners: dict[str, asyncio.Task[object]] = {}
+        # task_ids currently BLOCKED specifically because a begin_call-minted nested call
+        # is outstanding under them (candidate beta, D-62 task #25 dispatch gap, ADR
+        # pending). Populated by begin_call's mint branch, cleared only by _drive_coro's
+        # own completion path when the task actually reaches DONE — see begin_call's own
+        # docstring for why membership is not tied to the outstanding call closing.
+        # _scheduler_loop's deadlock check consults this before declaring deadlock.
+        self._backgrounded: set[str] = set()
         # Captured in run(), before asyncio.sleep is patched to virtual. _resume_task
         # uses this — never the module-level asyncio.sleep — to yield to the real event
         # loop for one tick; the module-level name is the *patched* one for the duration
@@ -948,17 +955,24 @@ class Scheduler:
         would hang the run after root itself finishes, waiting on a task nothing will ever
         complete. `end_call("")` (the no-op case) is always safe and does nothing.
 
-        **Status, 2026-09-03: this closes the identity collision only, not fan-out itself.**
-        With only this fix, a fan-out superstep's spawned node-body tasks never actually get
-        dispatched — `_scheduler_loop` cannot reach a fresh `_collect_runnable` while the
-        parent (e.g. root) is mid-resumption and stuck on Pregel's own raw
+        **Status, 2026-09-03: this closes the identity collision; the dispatch gap below is
+        candidate beta, being attempted, not yet validated.** With only the identity fix, a
+        fan-out superstep's spawned node-body tasks never actually got dispatched —
+        `_scheduler_loop` could not reach a fresh `_collect_runnable` while the parent
+        (e.g. root) was mid-resumption and stuck on Pregel's own raw
         `asyncio.gather`/`asyncio.wait`, since nothing about that raw await touches the
-        parent's own `Task.state`. A follow-up attempt (blocking the parent while fan-out
-        calls are outstanding, then waking it once they finish) fixed dispatch but broke
-        completion the other way — the parent's own coroutine, never actually suspended on
-        a scheduler Future in the first place, cannot safely be re-dispatched by the
-        scheduler at all. See the design note this prompted (`d62-fanout-dispatch.md`) for
-        the full trace and candidate fixes for `_scheduler_loop` itself — none chosen yet.
+        parent's own `Task.state`. A first follow-up attempt (blocking the parent while
+        fan-out calls are outstanding, then waking it once they finish) fixed dispatch but
+        broke completion the other way — the parent's own coroutine, never actually
+        suspended on a scheduler Future in the first place, cannot safely be re-dispatched
+        through `_resume_task`. A second attempt (nested dispatch, reusing `_choose` from
+        inside `_resume_task`'s own drain loop) avoided that bug but broke `explore/`'s
+        `decision_step` addressing (P13, gates G2, never-waived) instead. The block above —
+        candidate beta — takes the working half of the first attempt (block the parent) and
+        deliberately drops the broken half (never wake it through the scheduler; let
+        `_drive_coro`'s own existing completion path reach it, given real ticks by
+        `_scheduler_loop`'s deadline-check grace period). See `d62-design.md` §8 for the
+        full trace of all three attempts and what remains to be validated for this one.
 
         Args:
             agent_id: The agent this call is made on behalf of (same as the `spawn`/`join`
@@ -994,6 +1008,36 @@ class Scheduler:
         self._call_tokens[call_id] = bind_task(ctx)
         if current_real_task is not None:
             self._identity_owners[call_id] = current_real_task
+
+        # Candidate beta (D-62 task #25 dispatch gap, ADR pending, d62-design.md §8.6/8.7):
+        # reaching here means a *different* real asyncio.Task just inherited a copy of
+        # current_ctx's ambient identity and is minting its own — the fan-out case.
+        # current_ctx's own task (e.g. root) is, right now, almost always mid-drain inside
+        # _resume_task, stuck on Pregel's own raw asyncio.gather/asyncio.wait over the
+        # hidden tasks making these concurrent calls — nothing about that raw await ever
+        # touches its Task.state, so _scheduler_loop cannot reach a fresh
+        # _collect_runnable to dispatch this call's own freshly spawn()-ed node body. If
+        # current_ctx's task is still RUNNING, mark it BLOCKED: this lets _resume_task's
+        # drain loop return (its own `while task.state is TaskState.RUNNING` condition
+        # becomes false), handing control back to _scheduler_loop, which can then see and
+        # dispatch the new call's spawned task through the *ordinary* top-level path —
+        # one `_choose()` call per real turn, exactly as always. This does NOT introduce a
+        # second kind of scheduling decision the way an earlier, reverted design (nested
+        # dispatch reusing `_choose` from inside the drain loop) did — that one broke
+        # `explore/`'s `decision_step` addressing (P13, gates G2, never-waived) by making
+        # `self._step` advance in uneven bursts; this design never touches `self._step` at
+        # all. Deliberately does NOT record anything to reverse this later — see
+        # `end_call`'s own docstring and `_drive_coro`'s cleanup for why the "wake" half of
+        # an earlier, reverted attempt at this exact idea was the actual bug, not this half.
+        if current_ctx is not None:
+            owner_task = self._tasks.get(current_ctx.task_id)
+            if owner_task is not None and owner_task.state is TaskState.RUNNING:
+                owner_task.state = TaskState.BLOCKED
+                owner_task.wait_reason = (
+                    f"backgrounded: outstanding fan-out call {call_id!r} (candidate beta)"
+                )
+                self._backgrounded.add(current_ctx.task_id)
+
         return call_id
 
     def end_call(self, call_id: str) -> None:
@@ -1069,10 +1113,14 @@ class Scheduler:
         """The main scheduler loop.
 
         Invariant: on every iteration, either a task makes progress (step counter advances)
-        or the virtual clock advances (timer fires).  If neither happens, it is a deadlock.
+        or the virtual clock advances (timer fires).  If neither happens, it is a deadlock —
+        unless some task is ``self._backgrounded`` (candidate beta, D-62 task #25 dispatch
+        gap, ADR pending), in which case a bounded grace period of real ticks is granted
+        first.  See the ``if not runnable`` branch below for the full reasoning.
         """
         last_clock_ms = self._clock.now_ms()
         steps_at_last_clock_advance = 0
+        backgrounded_grace_ticks = 0
 
         while self._has_remaining_tasks():
             runnable = self._collect_runnable()
@@ -1080,6 +1128,32 @@ class Scheduler:
             if not runnable:
                 # Nothing runnable: check for timers.
                 if not self._timers:
+                    # Candidate beta: a task can be BLOCKED specifically because
+                    # begin_call marked it so, for an outstanding fan-out call
+                    # (self._backgrounded) — that task's own real asyncio.Task is still
+                    # alive and independently running (e.g. root, stuck on Pregel's own
+                    # raw asyncio.gather), and may reach DONE on its own, through
+                    # _drive_coro's ordinary completion path, given enough real ticks.
+                    # Declaring deadlock the instant _collect_runnable comes back empty
+                    # would treat "still settling" as "stuck" — so when the backgrounded
+                    # set is non-empty, grant real ticks up to resume_drain_ticks (the
+                    # same bound `_resume_task`'s own drain loop uses) before concluding
+                    # deadlock for real. A task that never went through begin_call (every
+                    # existing D-62 deadlock test) never enters `_backgrounded`, so this
+                    # branch is unreached for them — behaviour there is byte-for-byte
+                    # unchanged.
+                    if self._backgrounded:
+                        if backgrounded_grace_ticks >= self._config.resume_drain_ticks:
+                            raise DeadlockError(
+                                {
+                                    t.task_id: t.wait_reason
+                                    for t in self._tasks.values()
+                                    if t.state not in (TaskState.DONE,)
+                                }
+                            )
+                        await self._real_asyncio_sleep(0)
+                        backgrounded_grace_ticks += 1
+                        continue
                     raise DeadlockError(
                         {
                             t.task_id: t.wait_reason
@@ -1092,7 +1166,11 @@ class Scheduler:
                 self._clock.advance_to(earliest)
                 # Unblock any tasks whose timer has now fired.
                 self._unblock_timers()
+                backgrounded_grace_ticks = 0  # real progress happened — reset the budget
                 continue
+
+            # Real dispatch is about to happen — reset the backgrounded grace budget too.
+            backgrounded_grace_ticks = 0
 
             # Check step budget (livelock guard).
             now_ms = self._clock.now_ms()
@@ -1289,6 +1367,13 @@ class Scheduler:
             finally:
                 task.state = TaskState.DONE
                 self._identity_owners.pop(task.task_id, None)
+                # Candidate beta (D-62 task #25 dispatch gap): if begin_call ever marked
+                # this task BLOCKED for an outstanding fan-out call, it's cleared here —
+                # only once the task genuinely reaches DONE through this, its own real,
+                # ordinary completion path — never earlier. See begin_call's own comment
+                # for why cleanup deliberately does not happen when the outstanding call
+                # itself closes (that was the previous, reverted attempt's actual bug).
+                self._backgrounded.discard(task.task_id)
                 # If the task is still in the futures map, resolve it so nobody waits forever.
                 fut = self._task_futures.pop(task.task_id, None)
                 if fut is not None and not fut.done():
