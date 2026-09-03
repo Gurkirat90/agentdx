@@ -28,12 +28,20 @@ non-zero exit) would be exactly the kind of test §7 of the owning prompt exists
   as a CLI surface; `scenario`'s real subcommands are `validate`/`list`/`expand`/`new` (P17).
 - G6, G7 — `agentdx compare` and `agentdx analyze` are explicit P17 stubs (exit 2,
   "not yet implemented"), correctly out of P17's declared scope, not silently no-op'd.
-- G9 — `just demo-offline` fails at `exit 7, "no scenario files found under fixtures/
-  code_pipeline"`, a fixture-resolution gap reached *before* whatever G1's own blocker is —
-  originally a scheduler deadlock, now the missing `--assert` flag (see G1 above), neither
-  of which G9 ever reaches. (Corrected 2026-08-27, D-67: this package's first guess — that
-  G9 simply inherits G1's blocker — was wrong and left stale here until that repair pass
-  synced it with `test_gates.py`'s own already-corrected docstring.)
+- G9 — never waived (I7). Re-run for real 2026-09-03 (Python 3.12, real `just`, repo owner's
+  machine) now that D-62 task #25's dispatch gap is closed (candidate beta): `just
+  demo-offline` reaches `agentdx run fixtures/code_pipeline` for real and fails at
+  `exit 5, StoreError [E-STORE-010] run 'r_50f3b68c' already exists` — **D-78/D-80**, not a
+  new bug. `run_id` is a pure content hash of `(seed, scenario_hash, graph_hash)` (§6.1), the
+  store is append-only (I2), and re-running the identical fixture at the identical seed
+  collides with a row this same machine already wrote. The owner ruled the resolution on
+  2026-09-01 (D-80, **C-34**: reuse-and-print against a sealed row, replace against an
+  unsealed one) but it was never built — D-80's own row says so explicitly ("implementation
+  owed... blocks G9 independently of D-62"). This is the first real run to reach this path:
+  every earlier attempt hit either D-62's deadlock or D-77's since-fixed fixture-resolution
+  gap first, so D-80's ruling sat unimplemented but also un-blocking nothing visibly, until
+  candidate beta closed the one gap standing in front of it. G9 cannot pass until D-80 is
+  implemented, independently of everything else in this list.
 - G10 — `bench/harness/docker_cold_start.py`, the script `just bench-docker-cold` calls,
   does not exist yet. No Docker build has been attempted by this prompt (out of scope: no
   new features).

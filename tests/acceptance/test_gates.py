@@ -312,14 +312,20 @@ def test_g8_control_tower_renders_and_cross_highlights() -> None:
 def test_g9_offline_demo() -> None:
     """PRD §44.1 G9: the full three-fixture demo works offline, no API keys present.
 
-    Never waived (PRD §44.3 maps this to I7). Known-red as of 2026-08-27, corrected same
-    day against a real run (Python 3.12, real `just`, repo owner's machine): `just
-    demo-offline` fails at exit 7, `"no scenario files found under fixtures/code_pipeline"`
-    -- a fixture/scenario-resolution gap in `agentdx run`'s target handling, reached before
-    whatever G1's own blocker is (a scheduler deadlock originally, the missing `--assert`
-    flag now -- see `test_g1_seeded_race_is_detected`) ever comes into play. This
-    session's first guess (that G9 simply inherits G1's deadlock) was wrong; corrected here
-    rather than left stale now that a real run exists to check it against.
+    Never waived (PRD §44.3 maps this to I7). Re-run for real 2026-09-03 (Python 3.12, real
+    `just`, repo owner's machine) now that D-62 task #25's dispatch gap is closed (candidate
+    beta, `d62-design.md` SS8.7): `agentdx run fixtures/code_pipeline` is reached for real for
+    the first time and fails at `exit 5, StoreError [E-STORE-010] run 'r_50f3b68c' already
+    exists` -- **D-78/D-80**, not a new defect. `run_id` is a pure content hash of
+    `(seed, scenario_hash, graph_hash)` and the store is append-only (I2), so re-running the
+    identical fixture at the identical seed on the same machine collides with a row it
+    already wrote. The owner ruled the resolution 2026-09-01 (D-80, **C-34**: reuse-and-print
+    against a sealed row, replace against an unsealed one) but it was never implemented --
+    D-80's own row already said so ("implementation owed... blocks G9 independently of
+    D-62"). Every earlier attempt to reach this path hit either D-62's deadlock or D-77's
+    since-fixed exit-7 fixture-resolution gap first, so the previous docstring here (citing
+    exit 7) had gone stale without anyone observing it -- corrected now that a real run
+    exists to check it against, same standing practice as every other gate in this file.
     """
     _run_gate("G9", ["just", "demo-offline"], timeout_s=180)
 
