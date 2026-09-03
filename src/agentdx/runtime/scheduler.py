@@ -589,7 +589,17 @@ class Scheduler:
         # own completion path when the task actually reaches DONE — see begin_call's own
         # docstring for why membership is not tied to the outstanding call closing.
         # _scheduler_loop's deadlock check consults this before declaring deadlock.
-        self._backgrounded: set[str] = set()
+        # dict[str, None], not set[str]: check_determinism_hygiene.py (I1, tripwire 2) flags
+        # every bare `set()` literal, since set iteration order is a CPython implementation
+        # detail, not a language contract — found on real Python 3.12 hardware (this file had
+        # never been runnable end-to-end under the real Scheduler before candidate beta, so
+        # the checker had nothing real to walk here until now). Only membership (`in`/`add`-
+        # equivalent/`discard`-equivalent) and truthiness are ever needed — never iterated —
+        # but the checker flags the bare `set()` call site regardless, and this codebase's own
+        # established pattern for exactly this shape is a dict (see `self._identity_owners`
+        # just above), whose insertion order is a real language guarantee, not an
+        # implementation detail.
+        self._backgrounded: dict[str, None] = {}
         # Captured in run(), before asyncio.sleep is patched to virtual. _resume_task
         # uses this — never the module-level asyncio.sleep — to yield to the real event
         # loop for one tick; the module-level name is the *patched* one for the duration
@@ -1036,7 +1046,7 @@ class Scheduler:
                 owner_task.wait_reason = (
                     f"backgrounded: outstanding fan-out call {call_id!r} (candidate beta)"
                 )
-                self._backgrounded.add(current_ctx.task_id)
+                self._backgrounded[current_ctx.task_id] = None
 
         return call_id
 
@@ -1373,7 +1383,7 @@ class Scheduler:
                 # ordinary completion path — never earlier. See begin_call's own comment
                 # for why cleanup deliberately does not happen when the outstanding call
                 # itself closes (that was the previous, reverted attempt's actual bug).
-                self._backgrounded.discard(task.task_id)
+                self._backgrounded.pop(task.task_id, None)
                 # If the task is still in the futures map, resolve it so nobody waits forever.
                 fut = self._task_futures.pop(task.task_id, None)
                 if fut is not None and not fut.done():
