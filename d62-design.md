@@ -389,3 +389,91 @@ this section. ADR-018 (`begin_call`/`end_call`, §8.2) stands regardless of whic
 above is eventually chosen or built: none of them require reverting it, since the identity
 collision it closes is a real, separate bug from the dispatch gap, found first, fixed first,
 and orthogonal to how the dispatch gap is eventually resolved.
+
+### 8.6 Candidate α, attempted (2026-09-03) — a real cost §8.4 did not anticipate
+
+The owner picked α to build. §8.4's own cost line for it named one risk — a determinism
+argument for nested dispatch, not yet checked — and estimated the smallest blast radius of
+the three: no new `Task.state` bookkeeping, `_scheduler_loop`'s own loop and its
+`DeadlockError` condition both untouched. That estimate undercounted. Building it surfaced a
+second, unrelated cost before the determinism question was ever reached, and this one is not
+a "needs its own experiment" risk — it is an immediate, reproducible break in a **never-
+waived gate's** own supporting module, confirmed empirically twice, in two different shapes.
+
+**What was built.** `_resume_task`'s drain loop, on each tick, additionally collects other
+runnable tasks (excluding the one being drained) and dispatches them via `_choose` —
+preserving `_choose`'s own declared status as the module's single scheduling decision
+point — before re-checking the drained task's own state. Full suite run immediately, before
+anything else, per this session's own standing practice.
+
+**First variant: nested dispatch increments `self._step` and consults `_delay_schedule`,
+identically to a top-level turn.** Broke `tests/unit/explore/test_schedule.py`'s own decisive
+test, `test_decision_step_matches_live_scheduler_at_every_branch_point`: **1 failed, 2135
+passed** (full suite), confirmed causally attributable to this change alone by reverting it in
+isolation (12/12 in that file pass with the revert, 11/12 with it). Root cause:
+`explore/schedule.py`'s own `DelaySchedule` docstring proves, and its own decisive test
+verifies against a live `Scheduler`, that `decision_step = sched_step - 1` holds *only*
+because `self._step` increments exactly once per `_choose()` call, in strict 1:1 lockstep
+with `_scheduler_loop`'s own top-level turns — nothing else has ever called `_choose` before
+this change. Nested dispatch also calling `_choose`/incrementing `self._step` breaks that
+lockstep: step numbers arrive in uneven bursts, so `decision_step = sched_step - 1` no longer
+addresses the same logical top-level turn across a default run and a steered counterfactual
+of it, because the two runs can trigger different amounts of nested dispatch before reaching
+it. `explore/` is P13 (FR-6) — its bounded-exploration harness is what **G2 (never-waived,
+§44.3)** depends on, per CONTEXT.md's own invariant table. This is a materially worse finding
+than an I1 determinism question still needing an experiment: it is an already-confirmed break
+in a never-waived gate's supporting module, no experiment required to see it.
+
+**Second variant, tried after owner approval to redesign rather than abandon α: nested
+dispatch does *not* touch `self._step` at all** (no increment, `_delay_schedule` skipped
+entirely for nested picks — priority-pick only, no rng consumed). This does not fix the
+problem, it relocates and worsens it. `docs/event-schema.md`'s own field-level contract for
+`schedule_decision` marks `chosen_task_id` **stable** — part of the canonical projection,
+required to be byte-identical across replays — and `explore/schedule.py`'s `turns_from_events`
+enforces a hard, load-bearing invariant on top of that: two `schedule_decision` events may
+never share a `sched_step` with different `chosen_task_id`s, raising `MalformedRunError` if
+they do, because `sched_step` is stamped from `self._sched._step` on *every* event
+(`_SchedulerRecorder.write`, not just `schedule_decision`), and is documented as "unique per
+turn by construction." Not incrementing `self._step` for nested picks means the parent
+task's own turn-start event and the first nested pick's turn-start event collide on the same
+`sched_step` immediately. Confirmed empirically, same test file: **`MalformedRunError:
+sched_step 3 has two schedule_decision events naming different chosen_task_id values — not
+one coherent run`** — a hard crash, not a subtle mismatch, and now 2 of 12 tests in that file
+fail rather than 1.
+
+**Why this is not a numbering bug to patch.** Both directions were tried; both are wrong, for
+structurally different reasons, which pins the problem down precisely: `explore/`'s entire
+model — `Turn`, `turns_from_events`, `decision_step`'s arithmetic, and by extension
+`generate.py`'s BFS, which writes `decision_step` values back into new `DelaySchedule`s to
+explore — assumes exactly one `schedule_decision` event exists per distinct scheduling
+decision, addressed by a `sched_step` sequence that increments once per decision with no
+gaps and no two decisions sharing a value. Candidate α's whole premise — a second, nested
+category of scheduling decision, made *during* another task's drain window rather than at
+`_scheduler_loop`'s own top level — has no representation in that model at all. Neither
+"share the parent's step" nor "take a fresh one from the same sequence" is a numbering choice
+within that model's existing vocabulary; both violate an invariant the model states outright.
+
+**What closing this gap for real would require, not attempted here.** Some way for a
+nested-dispatch decision to be distinguishable from a top-level turn in the event stream
+itself — concretely, something like a new field on `schedule_decision`'s payload (e.g. a
+`nested: bool` or a parent-step reference), which is an **event schema change** — plus
+matching updates to `explore/schedule.py`'s `Turn`/`turns_from_events`/`decision_step` to
+either ignore nested decisions when computing top-level addressing or represent them as a
+new, first-class kind of node in the schedule tree, plus a corresponding update to
+`generate.py`'s BFS so its exploration still terminates and still explores what PRD §15
+intends once "the next decision" is no longer a flat sequence. This is real, multi-module
+design and implementation work — not something to fold into a nested-dispatch tweak inside
+`scheduler.py`, and changing the event schema is item one on this whole engagement's own
+standing stop conditions. Not scoped or attempted; recorded here as what α actually costs,
+now that it is known rather than estimated.
+
+**Status.** Both spike variants were reverted in full — confirmed via `git diff --stat`
+showing zero diff on `scheduler.py`, and the full suite re-confirmed green (2136 passed, 13
+deselected, matching the pre-spike baseline) immediately after each revert. Nothing from this
+investigation is in the working tree. §8.4's cost/benefit weighing for α, β and γ should be
+re-read with this section in mind — α's "smallest blast radius" framing no longer holds
+uncontested; whether it still wins depends on how the owner weighs "touches three modules,
+including a schema change, but avoids `_scheduler_loop`'s deadlock condition" against β's
+"stays in one module and one function, but touches the deadlock condition itself" or γ's
+"reopens an already-decided trade-off, but sidesteps this entire problem class by
+construction." No candidate is chosen as of this writing.
