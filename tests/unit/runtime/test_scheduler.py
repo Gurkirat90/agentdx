@@ -7,6 +7,8 @@ Most of these are, as asked, a few lines each — `conftest.build_scheduler` doe
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from agentdx.events.schema import DraftEvent, EventType
@@ -16,11 +18,22 @@ from agentdx.runtime.scheduler import (
     LifecycleTransitionError,
     LivelockError,
     RunState,
+    Scheduler,
     SchedulerError,
 )
 from agentdx.sdk import generic
 from tests.unit.events.factories import sample_payload
 from tests.unit.runtime.conftest import build_scheduler
+
+# Captured before any test's `scheduler.run()` patches the module-level `asyncio.sleep` to
+# virtual time (`Scheduler.run`, `runtime/scheduler.py`). A bare `await asyncio.sleep(...)`
+# called *while a scheduler is running* is redirected into that scheduler's own virtual
+# sleep, keyed by whatever `SchedTaskContext` happens to be ambient at the call site —
+# discovered empirically while writing the concurrency test below, which used
+# `asyncio.sleep(0)` to force real interleaving and instead deadlocked on the very dispatch
+# gap it was trying to route around (d62-design.md §8.3). This name is the one honest way
+# left in this file to force a real event-loop tick without going through the scheduler.
+_REAL_ASYNCIO_SLEEP = asyncio.sleep
 
 # ---------------------------------------------------------------------------------------
 # Single task
@@ -537,3 +550,147 @@ def test_scheduler_recorder_satisfies_the_sdk_generic_recorder_protocol() -> Non
         (),
     )
     assert seq == 0
+
+
+# ---------------------------------------------------------------------------------------
+# begin_call / end_call identity (ADR-018, task #25)
+#
+# These test the mechanism in isolation from the separate, still-open dispatch gap
+# (d62-design.md §8.3): every case below calls `begin_call`/`end_call` directly and asserts
+# on the returned id and on `self._identity_owners` bookkeeping, without ever `spawn`ing and
+# `join`ing a real node body through `_scheduler_loop`. That is deliberate — a call that
+# actually joins a spawned task would need `_scheduler_loop` to dispatch it, and a
+# concurrently-dispatched join is exactly the scenario that currently hits the dispatch gap
+# (see `tests/integration/runtime/test_d62_suspension_contract.py` for that, separate,
+# question). What is proven here — distinct, non-colliding identities under real concurrent
+# dispatch — is the whole of what candidate 2 (ADR-018) was built and approved to fix, and
+# no more.
+# ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_begin_call_from_the_owning_task_is_a_noop() -> None:
+    """Inline continuation (same real `asyncio.Task`) reuses the ambient identity.
+
+    Mirrors Pregel's single-ready-node fast path: `run_node_async` is called inline, on
+    whichever real task is already driving `graph.ainvoke()`. `begin_call` must recognise
+    that this real task already owns the identity ambient right now and change nothing —
+    this is the case an earlier, unconditional-mint version of `begin_call` broke (see
+    d62-design.md §8.2), orphaning the calling task's own `Task.state` at `RUNNING` forever.
+    """
+    scheduler, _sink, _clock = build_scheduler()
+    seen: list[str] = []
+
+    async def root() -> None:
+        seen.append(scheduler.begin_call(agent_id="planner"))
+        scheduler.end_call(seen[-1])
+        # A second inline call from the same real task is also a no-op — not a one-shot
+        # exemption tied to root's very first tick.
+        seen.append(scheduler.begin_call(agent_id="planner"))
+        scheduler.end_call(seen[-1])
+
+    await scheduler.run(root())
+    assert seen == ["", ""]
+
+
+async def _warm_up_with_a_sequential_call(scheduler: Scheduler, agent_id: str = "planner") -> None:
+    """Run one real `begin_call`+`spawn`+`join` step before a fan-out, and nothing else.
+
+    Root's *very first* suspension gets exactly one real tick (`_drive_coro`'s first-dispatch
+    path), not the `resume_drain_ticks` budget — that budget is only granted on a
+    *resumption*. A bare `await asyncio.ensure_future(...)` with no prior scheduler-tracked
+    suspension therefore deadlocks immediately (`E-SCHED-003`) for the same reason
+    `test_a_suspension_needing_another_task_deadlocks` does in
+    `test_d62_suspension_contract.py` — a real but uninteresting boundary, not the one these
+    tests are about. Every real fixture reaches its own fan-out step the same way: after a
+    prior node's `join()` resumes it (`d62-design.md` §8.1/§8.3, and `probe_fanout.py`'s own
+    "planner" step) — so this warm-up reproduces that precondition rather than sidestepping it.
+    """
+    call_id = scheduler.begin_call(agent_id=agent_id)
+    try:
+        task_id = scheduler.spawn(_trivial_body(), agent_id=agent_id)
+        await scheduler.join(task_id)
+    finally:
+        scheduler.end_call(call_id)
+
+
+async def _trivial_body() -> None:
+    """A `spawn`-able body that does nothing — just something real for `join` to wait on."""
+    return None
+
+
+@pytest.mark.asyncio
+async def test_begin_call_from_a_different_real_task_mints_a_fresh_identity() -> None:
+    """A hidden task that merely *inherited* the ambient identity gets its own instead.
+
+    `asyncio.ensure_future` inside `root`, while `root`'s own `SchedTaskContext` is bound,
+    reproduces exactly what `PregelRunner.atick`'s `self.submit()` does: a brand-new real
+    `asyncio.Task` that inherits root's ambient context by ordinary `contextvars`
+    copy-on-`Task`-creation, but is a different real task from root's own. `begin_call`
+    must tell the two apart and mint a fresh identity for the child.
+    """
+    scheduler, _sink, _clock = build_scheduler()
+    child_call_id: list[str] = []
+
+    async def child() -> None:
+        child_call_id.append(scheduler.begin_call(agent_id="coder"))
+        scheduler.end_call(child_call_id[0])
+
+    async def root() -> None:
+        await _warm_up_with_a_sequential_call(scheduler)
+        await asyncio.ensure_future(child())
+
+    await scheduler.run(root())
+    assert child_call_id[0] != ""
+    assert child_call_id[0].startswith("t_")  # a real minted task id, not the sentinel
+
+
+@pytest.mark.asyncio
+async def test_concurrent_begin_call_mints_distinct_non_colliding_identities() -> None:
+    """THE CLAIM UNDER TEST: two concurrently-dispatched callers never collide.
+
+    Two real `asyncio.Task`s, both created while root's `SchedTaskContext` is ambient (so
+    both inherit the *same* starting identity — the exact precondition of the join()
+    collision task #25 found), each call `begin_call`, yield control to force real
+    interleaving with the other, then record what they see before calling `end_call`. If
+    the two calls collided the way the pre-ADR-018 code did, one child's bookkeeping would
+    be overwritten by the other's; asserting both survive the interleaving point unmodified
+    is what "no collision, no orphaning" means concretely.
+    """
+    scheduler, _sink, _clock = build_scheduler()
+    seen: dict[str, tuple[str, object]] = {}
+
+    async def child(agent_id: str) -> None:
+        call_id = scheduler.begin_call(agent_id=agent_id)
+        # NOT asyncio.sleep(0) — see _REAL_ASYNCIO_SLEEP's own comment above: a bare
+        # asyncio.sleep here would be redirected into virtual time, keyed by the identity
+        # begin_call just bound, and deadlock on the dispatch gap rather than testing this.
+        await _REAL_ASYNCIO_SLEEP(0)  # force real interleaving with the other child
+        # Recorded *after* the interleaving point: proves the other child's begin_call,
+        # which ran in between, did not stomp this child's own bookkeeping.
+        seen[agent_id] = (call_id, scheduler._identity_owners.get(call_id))
+        scheduler.end_call(call_id)
+
+    async def root() -> None:
+        await _warm_up_with_a_sequential_call(scheduler)
+        await asyncio.gather(child("coder"), child("reviewer"))
+
+    await scheduler.run(root())
+
+    coder_call_id, coder_owner = seen["coder"]
+    reviewer_call_id, reviewer_owner = seen["reviewer"]
+
+    assert coder_call_id and reviewer_call_id, "both calls must mint a real identity"
+    assert coder_call_id != reviewer_call_id, "the two concurrent calls collided"
+    assert coder_owner is not reviewer_owner, "one child's identity was owned by the other"
+
+
+@pytest.mark.asyncio
+async def test_end_call_on_the_noop_sentinel_is_a_safe_noop() -> None:
+    """`end_call("")` — the no-op case's own close — must not raise or touch state."""
+    scheduler, _sink, _clock = build_scheduler()
+
+    async def root() -> None:
+        scheduler.end_call("")  # no matching begin_call at all; still must not raise
+
+    await scheduler.run(root())
