@@ -54,7 +54,14 @@ from agentdx.events.canonical import (
 )
 from agentdx.events.schema import SCHEMA_VERSION, Event, EventType, PayloadValue
 from agentdx.events.writer import ChainedEvent
-from agentdx.store.migrations import MigrationError, current_version, latest_version, migrate
+from agentdx.store.migrations import (
+    MIGRATIONS,
+    MigrationError,
+    current_version,
+    latest_version,
+    migrate,
+    trigger_names,
+)
 
 _DOCS: Final = "docs/storage.md"
 
@@ -613,6 +620,73 @@ class Store:
             detail = f"status {status!r} is not one of {list(RUN_STATUSES)}"
             raise StoreError("E-STORE-011", detail)
         self._conn.execute("UPDATE runs SET status = ? WHERE run_id = ?", (status, run_id))
+
+    def discard_orphan_run(self, run_id: str) -> None:
+        """Delete an **unsealed** run's row and events, so a colliding re-run can proceed.
+
+        D-80 (CONTEXT.md §9, ruled 2026-09-01, **C-34** §10): `run_id` is a pure content hash
+        of `(seed, scenario_hash, graph_hash)` (I1), so re-running identical inputs collides
+        with any prior row at the same id (`create_run`'s `E-STORE-010`). A collision against
+        a **sealed** row means the identical run already completed — the caller should reuse
+        it, never call this. A collision against an **unsealed** row is a different case: the
+        prior attempt never finished (the common cause historically was D-62's own scheduler
+        deadlock, which never called `close_run`/`seal` at all), so the row holds no
+        analysable log — PRD §27.3 already reasons this way about an interrupted run. This
+        method is what "replace" means for that case.
+
+        **Why this does not weaken I2.** `events_no_update`/`events_no_delete` are the *only*
+        enforcement of the append-only guarantee (module docstring) — nothing in this class
+        otherwise issues an UPDATE or DELETE against `events`, and this method is the one
+        deliberate, narrow exception, modeled on the identical precedent
+        `store.migrations._apply` already uses for a `rewrites_events=True` migration: drop
+        the triggers, do the one write this method exists for, reinstate them, and verify
+        they exist again before the transaction commits. The guard that keeps this from
+        becoming a general-purpose escape hatch is the seal check below, re-read inside the
+        *same* transaction that drops the triggers — a run cannot be sealed by another
+        connection between this method's check and its delete, and a sealed run's own events
+        remain exactly as undeletable through this method as through any other path.
+
+        Raises:
+            StoreError: `E-STORE-004` no such run · `E-STORE-005` the run is sealed (refuses;
+                changes nothing) · `E-STORE-006` the append-only triggers were not both
+                present again after this method's own write (defensive; would mean this
+                method itself has a bug, not a caller error).
+        """
+        with self.transaction():
+            row = self._conn.execute(
+                "SELECT sealed_at FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                detail = f"run {run_id!r} not found in {self._path}"
+                raise StoreError("E-STORE-004", detail)
+            if row[0] is not None:
+                detail = (
+                    f"run {run_id!r} is sealed; refusing to discard it — a sealed run's log "
+                    f"is append-only and closed (I2), reuse it instead of replacing it"
+                )
+                raise StoreError("E-STORE-005", detail)
+            for name in trigger_names():
+                self._conn.execute(f"DROP TRIGGER IF EXISTS {name}")
+            try:
+                self._conn.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
+                self._conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+            finally:
+                for statement in MIGRATIONS[0].triggers:
+                    self._conn.execute(statement)
+            still_missing = [
+                name
+                for name in trigger_names()
+                if self._conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?", (name,)
+                ).fetchone()
+                is None
+            ]
+            if still_missing:
+                detail = (
+                    f"append-only triggers {still_missing} missing after discarding "
+                    f"{run_id!r} — refusing to commit (I2)"
+                )
+                raise StoreError("E-STORE-006", detail)
 
     # -- events -------------------------------------------------------------------------
 

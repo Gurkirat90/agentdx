@@ -56,9 +56,15 @@ from agentdx.cli._target import (
     is_fixture_name,
     resolve_target,
 )
-from agentdx.cli.host import CliRunHost, build_cache, build_cache_hook, build_fault_hooks
+from agentdx.cli.host import (
+    CliRunHost,
+    RunAlreadyExistsError,
+    build_cache,
+    build_cache_hook,
+    build_fault_hooks,
+)
 from agentdx.config import AgentDXConfig
-from agentdx.events.schema import DraftEvent, Event
+from agentdx.events.schema import DraftEvent, Event, EventType
 from agentdx.events.writer import EventWriter
 from agentdx.runtime.clock import VirtualClock
 from agentdx.runtime.determinism import DeterminismLeakError
@@ -91,6 +97,14 @@ class _RunOutcome:
     analysis: AnalysisResult | None
     summary: CliRunSummary | None
     detail: str | None = None
+    reused: bool = False
+    """True iff this outcome is a stored, sealed run reused rather than freshly executed.
+
+    D-80/C-34 (`d78-plan.md` §6's own open question, resolved here rather than left
+    unimplemented): a reused outcome must be distinguishable from a fresh one, so a `--ci`
+    consumer diffing two JSON payloads can tell "this re-ran" from "this was already
+    known" — additive field only, `False` for every path that existed before D-80, so no
+    existing consumer's parsing changes."""
 
 
 def _is_scenario_path(target: str) -> bool:
@@ -327,11 +341,55 @@ def _score_one(
     return analysis, summary, tuple(results)
 
 
+def _score_reused(
+    *, run_id: str, events: tuple[Event, ...], scenario: LoadedScenario | None
+) -> tuple[AnalysisResult, CliRunSummary, tuple[AssertionResult, ...]]:
+    """Reconstruct a sealed run's own scorecard/findings/assertions from its stored log.
+
+    D-80 (CONTEXT.md §9, ruled 2026-09-01, **C-34** §10): a `run_id` collision against a
+    sealed run means the identical run already exists — I1 guarantees this stored log is
+    what a fresh run would produce, so this recomputes exactly what `_score_one` would
+    have, from the stored events, rather than executing anything a second time.
+
+    **The one thing this cannot recompute, and does not pretend to:** a `python`-type
+    `success_check` needs the graph's final output state (`run_result.output`), which is
+    not part of the persisted event log — `RUN_END`'s own payload (`host.py::close_run`)
+    carries counts and timings, never the graph's return value, by design. So
+    `success_check_passed` stays `None` here. That is not a new special case:
+    `evaluate_assertion` already treats `None` identically to "no `success_check`
+    configured at all", the same value a scenario with none set produces on a fresh run —
+    a check that reads `success_check_passed` reports `not_measurable`, not wrong or
+    fabricated. `faults_fired` *is* fully recoverable, unlike the success-check output: it
+    is a straight count of this run's own persisted `fault_injected` events, the same
+    fact `close_run` would have reported live.
+    """
+    analysis = analyze_events(events)
+    faults_fired = sum(1 for e in events if e.type is EventType.FAULT_INJECTED)
+    summary = CliRunSummary(
+        run_id=run_id,
+        analysis=analysis,
+        faults_fired=faults_fired,
+        success_check_passed=None,
+        deterministic_replay_verified=None,
+        findings=tuple(analysis.race_findings),
+    )
+    resolved = scenario.resolved if scenario is not None else None
+    assertion_items = resolved.get("assertions", []) if resolved is not None else []
+    results: list[AssertionResult] = []
+    if isinstance(assertion_items, list):
+        for item in assertion_items:
+            if isinstance(item, str | dict):
+                results.append(evaluate_assertion(item, _as_run_summary(summary)))
+    return analysis, summary, tuple(results)
+
+
 def _print_human_outcome(out: Output, outcome: _RunOutcome) -> None:
     color = "green" if outcome.status == "passed" else "red"
     out.line(out.style(f"{outcome.scenario_name}: {outcome.status}", color=color, bold=True))
     if outcome.run_id is not None:
         out.line(f"  run_id: {outcome.run_id}")
+    if outcome.reused:
+        out.line("  (reused: identical seed/scenario/graph already ran; not re-executed — D-80)")
     if outcome.analysis is not None:
         verdict = outcome.analysis.verdict
         out.line(
@@ -678,6 +736,30 @@ async def _run_and_score(
             run_mode="chaos" if faults else "baseline",
             out=out,
         )
+    except RunAlreadyExistsError as exc:
+        # D-80/C-34 (`d78-plan.md`): a sealed collision is reused and printed with *its own*
+        # verdict's exit code, never a blanket 0 — re-scored from the stored log exactly as
+        # `_score_one` would score a fresh execution (`_score_reused`'s own docstring), so a
+        # previously-red run stays red on re-invocation (`d78-plan.md` §4's own governing
+        # rule: exit codes are a MAJOR contract, PRD §37.2, and reuse must not flatten them).
+        run_id = exc.record.run_id
+        events = tuple(store.read_events(run_id))
+        analysis, summary, assertions = _score_reused(
+            run_id=run_id, events=events, scenario=scenario
+        )
+        failed = [a for a in assertions if a.status == AssertionStatus.FAILED]
+        status = "failed" if failed else "passed"
+        exit_code = ASSERTION_FAILURE if failed else OK
+        return _RunOutcome(
+            scenario_name=scenario_name,
+            run_id=run_id,
+            status=status,
+            exit_code=exit_code,
+            assertions=assertions,
+            analysis=analysis,
+            summary=summary,
+            reused=True,
+        )
     except CacheMissError as exc:
         return _RunOutcome(
             scenario_name, None, "failed", CACHE_MISS, (), None, None, detail=str(exc)
@@ -742,6 +824,7 @@ def _finish(
                 verdict_class=(o.analysis.verdict.verdict_class.value if o.analysis else None),
                 coordination_score=(o.analysis.verdict.coordination_score if o.analysis else None),
                 metrics=_metrics_of(o),
+                reused=o.reused,
             )
             for o in outcomes
         )

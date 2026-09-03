@@ -71,6 +71,14 @@ class ScenarioOutcome:
     confidence: str | None = None
     bundle: str | None = None
     metrics: dict[str, float] = field(default_factory=dict)
+    reused: bool = False
+    """D-80/C-34 (`d78-plan.md` §6): a `run_id` collision against an already-sealed run is
+    reused rather than re-executed. Not one of PRD §22.4's own named top-level keys, same
+    class of deliberate addition as `metrics` above — omitted from the JSON entirely when
+    `False` (every scenario before D-80 existed) so an existing `--baseline-run` consumer's
+    parsing is unaffected; present and `true` only for a run this invocation reused, so a
+    CI consumer diffing two summaries can tell "this re-ran" from "this was already known"
+    rather than conflating the two."""
 
     def as_dict(self) -> dict[str, object]:
         """Return the PRD §22.4 JSON shape for one scenario."""
@@ -88,6 +96,8 @@ class ScenarioOutcome:
             }
         if self.bundle is not None:
             out["bundle"] = self.bundle
+        if self.reused:
+            out["reused"] = True
         if self.metrics:
             # Not one of PRD §22.4's own named top-level keys, but load-bearing for §22.6:
             # `check_regression` reads `scenario.metrics` back off a *round-tripped*

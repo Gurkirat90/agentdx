@@ -1,9 +1,14 @@
 # D-78 resolution plan — `run_id` collision on re-run
 
-**Status:** owner-decided (reuse-and-print), **not implemented**. This is the spec a
-follow-on prompt executes. It is not a repair to be folded into P19 — it changes observable
-CLI behaviour and touches the `cli/` ↔ `store/` seam, so it needs its own prompt, its own
-tests, and an ADR for the one open question in §6.
+**Status (2026-09-03): implemented.** See CONTEXT.md §8 **ADR-020** for the built mechanism,
+its one deviation from this plan's own §5.1 wording (deleting an orphan's events needs a
+narrow, guarded bypass of `events_no_delete`/`events_no_update` this plan did not spell
+out — see ADR-020's own text), and how §6's open question was resolved (additively, not via
+a separate ADR of its own). §7's five decisive tests are built:
+`tests/unit/store/test_discard_orphan_run.py` (test 4, plus the store half of 3 and 5) and
+`tests/integration/cli/test_run_reuse.py` (tests 1, 2, the CLI half of 3 and 5, plus a sixth
+covering §6's own resolution). This plan's own text below is left as written — the record of
+what was decided before building, not edited to match what shipped.
 
 ---
 

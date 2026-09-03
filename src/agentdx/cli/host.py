@@ -75,10 +75,40 @@ __all__ = [
     "UNSUPPORTED_LIVE_FAULT_TYPES",
     "CliRunHost",
     "OpenedRun",
+    "RunAlreadyExistsError",
     "build_cache",
     "build_cache_hook",
     "build_fault_hooks",
 ]
+
+
+class RunAlreadyExistsError(RuntimeError):
+    """`open_run` found `run_id` already exists as a **sealed** run — reuse it, don't refuse.
+
+    D-80 (CONTEXT.md §9, ruled 2026-09-01, **C-34** §10, spec in `d78-plan.md`): `run_id` is
+    a pure content hash of `(seed, scenario_hash, graph_hash)` (I1), so identical inputs
+    always collide with any prior row at that id (`store.sqlite.Store.create_run`'s own
+    `E-STORE-010`). A collision against a *sealed* row means the identical run already ran
+    to completion and, by I1, would produce byte-identical output — so the CLI reuses the
+    stored result and prints it rather than either refusing outright or silently redoing
+    work whose answer is already known. (A collision against an *unsealed* row is the other
+    case D-80 splits out — `open_run` handles that one itself, via
+    `Store.discard_orphan_run`, without ever raising this.)
+
+    This is raised, not printed, from here: `host.py`'s own module docstring is explicit
+    that composition-root code holds no `Output` and does not render — `cli.commands.run`
+    is where the reused run's scorecard/findings actually get printed and its exit code
+    chosen (`d78-plan.md` §4), the same way this module already leaves `AbortGuardTripped`/
+    `CacheMissError`/`DeterminismLeakError` for `cli/` to classify rather than handling any
+    of them here.
+    """
+
+    def __init__(self, record: RunRecord) -> None:
+        """Carry the existing, sealed `RunRecord` so the caller needs no second store read."""
+        self.record = record
+        msg = f"run {record.run_id!r} already exists and is sealed; reusing it, not re-running"
+        super().__init__(msg)
+
 
 UNSUPPORTED_LIVE_FAULT_TYPES: frozenset[str] = frozenset(
     {"latency", "message_drop", "tool_failure"}
@@ -207,8 +237,24 @@ class CliRunHost:
         already resolved the seed that built `self._scheduler`/`self._run_id` before this
         host was constructed (module docstring's composition note), so this only asserts the
         two agree rather than silently trusting a caller that might pass something else.
+
+        **`run_id` collision handling (D-80, C-34 — see `RunAlreadyExistsError`'s own
+        docstring for the full ruling).** Checked before `create_run` rather than left to
+        surface as `E-STORE-010`, because the two collision causes need two different
+        responses that `create_run`'s own `IntegrityError` cannot distinguish: a **sealed**
+        collision raises `RunAlreadyExistsError` for `cli/` to reuse; an **unsealed** one —
+        an orphan from a prior attempt that never reached `close_run`/`seal` — is silently
+        replaced via `Store.discard_orphan_run` and this proceeds exactly as a fresh run.
+
+        Raises:
+            RunAlreadyExistsError: `run_id` collides with an already-sealed run.
         """
         resolved_seed = self._seed if seed is None else seed
+        existing = self._store.get_run(self._run_id)
+        if existing is not None:
+            if existing.sealed:
+                raise RunAlreadyExistsError(existing)
+            self._store.discard_orphan_run(self._run_id)
         started_at = _started_at_utc()
         self._store.create_run(
             RunRecord(
