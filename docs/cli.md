@@ -91,7 +91,8 @@ scenario assertions against the sealed log.
 | `--seed N` | Override the run seed. |
 | `--faults TYPE:AGENT:AT_VIRTUAL_MS` | Arm one fault ad hoc (direct-target mode; CLI-invented shorthand, not a PRD grammar — scenario files' own `faults:` block is the richer, PRD-given form). |
 | `--cache-mode MODE` | `record\|replay\|perturb\|passthrough` (default `[run] mode`, `replay`). |
-| `--baseline` | **Not yet implemented** — needs `analysis.baseline`'s `BaselineExecutor`. |
+| `--assert 'PATH OP VALUE'` | Repeatable. Evaluate an ad-hoc assertion against the run's own findings — e.g. `'findings.race >= 1'`. CLI-invented shorthand, not a §37.1 grammar (PRD §44.1's G1 gate is its own only textual source, same class as `--faults`); only `findings.<type-or-alias>` paths are supported today (`scenario/assertions.py::eval_findings_type_count`). Every `--assert` must hold for the run to exit 0. |
+| `--baseline` | Still a stub on `run` itself — generates a warning, comparison-dependent assertions report `not_measurable`. A real, working baseline comparison exists on `compare --baseline`/`analyze --scorecard` (below); wiring `run --baseline` to the same `cli._baseline.CliBaselineExecutor` is a natural follow-up, not yet done. |
 | `--ci` | Machine-readable mode (§22.1): no prose, writes JSON + JUnit to `--out`. |
 | `--out DIR` | `--ci` artefact directory (default `.agentdx/ci`). |
 | `--baseline-run PATH` | A previous `--ci` `summary.json` to regression-check against (§22.6). |
@@ -127,16 +128,62 @@ test_doctor.py` deliberately breaks three setups and asserts `doctor` catches ea
 missing/wrong `PYTHONHASHSEED`, a store db claiming a schema version this build cannot read,
 and a port already bound by something else.
 
-### `agentdx scenario validate|list|expand`
+### `agentdx scenario validate|list|expand|run`
 
-Thin wrappers over `cli._scenario_io`'s load → `extends`-resolve → validate → resolve-defaults
-chain (already built and tested by `scenario/`) plus `scenario.matrix.expand_matrix`.
-`validate PATH` accepts a file or a directory (validates every scenario found, sorted-path
-order); `list [PATH]` prints each discovered scenario's id; `expand PATH` prints the full
-matrix cross-product, or says plainly that the scenario has none.
+`validate`/`list`/`expand` are thin wrappers over `cli._scenario_io`'s load →
+`extends`-resolve → validate → resolve-defaults chain (already built and tested by
+`scenario/`) plus `scenario.matrix.expand_matrix`. `validate PATH` accepts a file or a
+directory (validates every scenario found, sorted-path order); `list [PATH]` prints each
+discovered scenario's id; `expand PATH` prints the full matrix cross-product, or says
+plainly that the scenario has none. None of the three executes anything.
+
+`scenario run PATH [--repeat N]` does execute — CLI-invented, PRD §44.1's G4 gate command
+is its only textual source (also used, identically shaped, in PRD §22.1's own worked
+examples). Runs the scenario `--repeat` times (default 1) at its own fixed seed, each
+repeat in a fresh, isolated, throwaway `Store` (never the user's real data dir — otherwise
+repeat 2..N would hit D-80's reuse-and-print path against repeat 1's own row and never
+genuinely re-execute), and reports whether every repeat produced an identical outcome —
+confirming I1 (determinism) for one real fixture + fault, not just the synthetic harnesses
+that already cover it. `cli/commands/scenario_run.py` has the full design rationale.
 
 `scenario new` (generate a scenario, optionally derived from a run) is deferred — see NOT
 DONE below.
+
+### `agentdx compare RUN_ID [RUN_ID_B] [--baseline] [--tolerance-file] [--force]`
+
+Two forms share one command (a real PRD-internal gap, same class as `--assert`/`--faults`):
+PRD §37.1 gives `compare RUN_A RUN_B` (two explicit run ids, diffed directly — no baseline
+generated); PRD §44.1's G6 gate gives `compare RUN_ID --baseline` (one run id, a generated
+single-agent baseline). `RUN_ID_B` is optional here precisely so both are the same command.
+`--baseline` generates the baseline via `cli._baseline.CliBaselineExecutor` — a real,
+scripted single-agent execution through the real `Scheduler`/`CliRunHost` for whichever
+target `RUN_ID` names (found via its stored `scenario_id`; populated for a direct-target run
+by `cli.commands.run._run_and_score`'s `direct_target_name`) — and prints the PRD §17.4
+scorecard. Only `code_pipeline` has a registered baseline graph today (`fixtures/
+code_pipeline/graph.py::build_baseline_graph` — none of the three P05 fixtures' agents call
+a live model, so a baseline is scripted the same way as the multi-agent side, not prompted);
+any other target fails honestly (`USAGE_ERROR`), never a fabricated comparison.
+`--tolerance-file`/`--force` are declared for the two-run form but not yet wired to `cli.
+ci.check_regression`'s tolerance engine — passing either prints a warning, changes nothing.
+
+### `agentdx analyze RUN_ID [--scorecard]`
+
+Re-runs the P10-P12 analysers over a sealed log and prints its PRD §18 verdict. `--scorecard`
+additionally generates a baseline (the identical `cli._baseline.CliBaselineExecutor` path
+`compare --baseline` uses) and prints the same PRD §17.4 scorecard — PRD §44.1's G7 gate,
+framed as "the full analysis of this run" rather than "this run vs. a comparison." Everything
+else about baseline availability/failure matches `compare --baseline` exactly (they share the
+one code path, not two copies of it).
+
+**Honest, standing caveat on both commands' scorecard numbers.** `runtime/scheduler.py` does
+not yet apply any `CalibrationProfile` to spans — no `duration_for` call site exists there at
+all (`CalibrationProfile.defaults_only`/`SchedulerCacheHook` are both built and unused by the
+live scheduler, the same "wired... but never called" shape this file's own `cli/host.py`
+reference already documents for the cache hook). Every span's virtual duration is therefore
+`0` for a tool-call-only fixture like `code_pipeline`, so `achieved_speedup` prints `0.00x`
+— an honest `0` (`compare()`'s own `t_multi_ms > 0` guard prevents a fabricated positive
+number), not yet a number with real magnitude. Wiring calibration into the live `Scheduler`
+is a `runtime/` change, outside the scope that built these two commands.
 
 ### `agentdx version`
 
@@ -148,13 +195,12 @@ Unchanged from P14: serves `agentdx.api.app`'s FastAPI app. See `docs/api.md`.
 
 ### Not yet implemented (exit 2, name themselves and why)
 
-`replay`, `analyze`, `compare`, `export`, `import`, `scenario new`, every `cache` subcommand,
-`baseline update`, and `bench` (P18's own command) all currently exit 2 with a message naming
-the reason, rather than presenting a stub as working behaviour. See NOT DONE/RISKS in this
-response for the reasoning behind deferring each — the short version: `run`/`doctor`/
-`scenario {validate,list,expand}`/`instrument`/`version`, the §22 `--ci` machinery, and the
-exit-code contract were prioritised (mission Design Constraint 7: "`--ci` is scope-cut #2 —
-build P0 commands first").
+`replay`, `export`, `import`, `scenario new`, every `cache` subcommand, `baseline update`,
+and `bench` (P18's own command) all currently exit 2 with a message naming the reason,
+rather than presenting a stub as working behaviour. `compare` and `analyze` (above) are no
+longer in this list as of 2026-09-04. The short version for what remains: `run`/`doctor`/
+`scenario {validate,list,expand,run}`/`compare`/`analyze`/`instrument`/`version`, the §22
+`--ci` machinery, and the exit-code contract were prioritised.
 
 ## `--ci` mode: machine-readable output (PRD §22.4)
 
@@ -223,7 +269,15 @@ fixture cache (I7). Every step in this file was run manually against the real, s
 `junit.xml` to `ci-out/` — exactly the "if: always()" artifact-upload behaviour this workflow
 depends on.
 
-## Known gap: no fixture graph can complete a real run yet
+## Known gap: no fixture graph can complete a real run yet (SUPERSEDED 2026-09-04)
+
+**This section is historical.** The dispatch gap it describes is closed (ADR-017, D-62 task
+#25's candidate beta, ADR-022) and confirmed on real Python 3.12 hardware: `agentdx run
+fixtures/code_pipeline` completes end-to-end (G9, `just demo-offline` exits 0), and `agentdx
+run --assert`/`scenario run --repeat`/`compare --baseline`/`analyze --scorecard` (G1/G4/G6/
+G7) all pass as real subprocess invocations of the literal `agentdx` binary. See CONTEXT.md
+§6 for the current, authoritative gate-by-gate status. Left below verbatim as the record of
+what was found and why, not as a currently-true claim.
 
 Building `agentdx run` surfaced a gap outside this prompt's DELIVERABLES: **nothing in `sdk/`
 calls `runtime.scheduler.Scheduler.spawn()`** — neither `sdk.langgraph.LangGraphAdapter` nor

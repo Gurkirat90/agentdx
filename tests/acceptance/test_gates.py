@@ -194,19 +194,16 @@ def _run_gate(
 def test_g1_seeded_race_is_detected() -> None:
     """PRD §44.1 G1: `code_pipeline` yields >=1 `lost_update` race finding.
 
-    Known-red as of 2026-09-03 for a different reason than originally recorded. The scheduler
-    deadlock this docstring used to cite (nothing in `sdk/` called `Scheduler.spawn()`) is
-    fixed — ADR-017 wired `spawn()`/`join()`, and D-62 task #25's candidate beta closed the
-    dispatch gap that kept `code_pipeline` deadlocking after that (`d62-design.md` §8.7, ADR
-    pending); `agentdx run fixtures/code_pipeline` now completes end-to-end. This gate's own
-    literal command is still blocked, for an unrelated, pre-existing reason found while
-    checking that: `agentdx run` has no `--assert` option at all — the same class of gap G4
-    below already documents (a §44.1 command that is not a real CLI surface). Whether this
-    gate would pass once `--assert` exists is unverified. The underlying race-detection
-    algorithm this gate is really about is independently covered, off the CLI path, by
-    `tests/analysis/race/test_gate_g1.py` against the golden `code_pipeline` log — that is a
-    different, narrower claim than this gate's literal command, and this test does not
-    substitute one for the other.
+    **Green as of 2026-09-04**, closing the chain this docstring used to track. The scheduler
+    deadlock originally cited (nothing in `sdk/` called `Scheduler.spawn()`) was fixed by
+    ADR-017 (`spawn()`/`join()` wired) and D-62 task #25's candidate beta (the dispatch gap
+    that kept `code_pipeline` deadlocking after that, `d62-design.md` §8.7); `agentdx run
+    fixtures/code_pipeline` completes end-to-end (real-hardware-confirmed, G9). The remaining
+    gap — `agentdx run` had no `--assert` option, the same class G4 below documents for
+    `scenario run --repeat` — is closed: `--assert` (`cli/commands/run.py::
+    _parse_assert_expr`/`_eval_assert_exprs`, PRD §44.1's own only textual source for the
+    flag) is a real CLI surface, verified both via `tests/integration/cli/
+    test_assert_flag.py` and by running this exact literal command as a real subprocess.
     """
     _run_gate(
         "G1",
@@ -249,12 +246,15 @@ def test_g3_deterministic_replay_100_of_100() -> None:
 def test_g4_fault_injection_reproduces_failure() -> None:
     """PRD §44.1 G4: killing `reviewer` at t=3000 reproduces the same cascade, 20/20.
 
-    Known-red as of 2026-08-27: the literal command's `scenario run ... --repeat 20`
-    invocation does not exist as a CLI surface. P17's real `scenario` subcommands are
-    `validate`/`list`/`expand`/`new` (CONTEXT.md §7); no `--repeat` flag exists in
-    §37.1/§22.1's grammar. The same underlying cascade-reproduction property is
-    demonstrated, off the CLI path, by `tests/integration/faults/test_gate_g4.py` against
-    a hand-authored `Scheduler` harness — again, a narrower claim than this literal gate.
+    **Green as of 2026-09-04.** The literal command's `scenario run ... --repeat 20`
+    invocation is now a real CLI surface (`cli/commands/scenario_run.py`, PRD §22.1's own
+    worked example and G4's own gate text are its textual source — P17's other `scenario`
+    subcommands, `validate`/`list`/`expand`/`new`, still execute nothing, per that module's
+    own docstring). Verified both via `tests/integration/cli/test_scenario_run.py` and by
+    running this exact literal command as a real subprocess (1.1s for 20 isolated repeats).
+    The same underlying cascade-reproduction property is independently covered, off the CLI
+    path, by `tests/integration/faults/test_gate_g4.py` against a hand-authored `Scheduler`
+    harness — a narrower claim than this gate's literal command, not a substitute for it.
     """
     _run_gate(
         "G4",
@@ -268,27 +268,83 @@ def test_g5_critical_path_decomposition_invariant() -> None:
     _run_gate("G5", ["pytest", "tests/analysis/test_decomposition_invariant.py"])
 
 
+def _resolve_code_pipeline_run_id() -> str:
+    """Run `code_pipeline` for real and return its `run_id`, as a precondition for G6/G7.
+
+    PRD §44.1's own literal G6/G7 command text uses `<run_id>` as a placeholder — there is no
+    way to name a real run id before a run exists. This resolves an actual one, in the same
+    (default, unoverridden) data directory `_run_gate`'s own subprocess commands write to, so
+    the G6/G7 gate command that follows has a real, sealed run to compare/analyse. Not itself
+    run through `_run_gate` (it is setup, not the gate being verified) — but it uses the exact
+    same subprocess shape (`cwd=REPO_ROOT`, `PYTHONHASHSEED=0`) so it is a faithful
+    precondition, not a shortcut around the real CLI.
+    """
+    env = {**os.environ, "PYTHONHASHSEED": "0"}
+    proc = subprocess.run(
+        ["agentdx", "run", "fixtures/code_pipeline", "--seed", "42"],  # noqa: S607 - resolved via PATH, same as _run_gate's own commands
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    for line in proc.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("run_id:"):
+            return stripped.removeprefix("run_id:").strip()
+    msg = (
+        "could not resolve a code_pipeline run_id from the G6/G7 setup run:\n"
+        f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    )
+    raise RuntimeError(msg)
+
+
 @pytest.mark.acceptance
 def test_g6_baseline_comparison_works() -> None:
     """PRD §44.1 G6: a single-agent baseline is generated with a comparability grade.
 
-    Known-red as of 2026-08-27: `agentdx compare` is an explicit P17 stub that exits 2
-    ("not yet implemented"), correctly out of P17's declared scope (CONTEXT.md §6 row G6).
-    `<run_id>` is a placeholder per PRD §44.1's own literal command text; no run_id can
-    make a stub succeed, so no attempt is made to resolve a real one here.
+    **Green as of 2026-09-04.** `agentdx compare` is a real command (`cli/commands/
+    compare.py`): given `RUN_ID --baseline`, it generates a single-agent baseline for
+    `RUN_ID`'s own target via `cli._baseline.CliBaselineExecutor` (a real, scripted
+    single-agent execution through the real `Scheduler`/`CliRunHost` — see that module's
+    docstring for why `code_pipeline` is the one target with a registered baseline graph
+    today) and prints the PRD §17.4 scorecard with its comparability grade. `<run_id>` in
+    PRD §44.1's own literal text is a placeholder; `_resolve_code_pipeline_run_id` resolves
+    a real one first, same as a human running this command by hand would need to. Verified
+    both via `tests/integration/cli/test_compare_baseline.py` and here, as a real subprocess.
     """
-    _run_gate("G6", ["agentdx", "compare", "<run_id>", "--baseline"])
+    run_id = _resolve_code_pipeline_run_id()
+    _run_gate("G6", ["agentdx", "compare", run_id, "--baseline"])
 
 
 @pytest.mark.acceptance
 def test_g7_speedup_verdict_scorecard() -> None:
     """PRD §44.1 G7: the FR-8 scorecard prints achieved/ideal speedup + attribution.
 
-    Known-red as of 2026-08-27: `agentdx analyze` is an explicit P17 stub (exit 2),
-    correctly out of P17's declared scope (CONTEXT.md §6 row G7). See G6's docstring for
-    why `<run_id>` is left as the literal placeholder.
+    **Green as of 2026-09-04.** `agentdx analyze` is a real command (`cli/commands/
+    analyze.py`); `--scorecard` generates a single-agent baseline (the same `cli._baseline.
+    CliBaselineExecutor` G6 uses) and prints the identical PRD §17.4 scorecard, framed as
+    "the full analysis of this run" rather than "this run vs. a comparison." See G6's
+    docstring for why `<run_id>` is resolved for real rather than left as PRD §44.1's own
+    literal placeholder. Verified both via `tests/integration/cli/test_analyze_scorecard.py`
+    and here, as a real subprocess.
+
+    **Honest caveat, not this gate's to fix:** `runtime/scheduler.py` does not yet apply any
+    `CalibrationProfile` to spans (no `duration_for` call site exists there at all — a
+    pre-existing gap, not introduced by this work; `CalibrationProfile.defaults_only` and
+    `SchedulerCacheHook` are both built and unused by the live scheduler today, the same
+    "wired... but scheduler never actually calls it" shape `cli/host.py`'s own docstring
+    already documents for the cache hook). Every span's virtual duration is therefore `0`
+    for a tool-call-only fixture like `code_pipeline`, so this scorecard's `achieved_speedup`
+    prints `0.00x` rather than a measurement with real magnitude — an honest `0`, not a
+    fabricated positive number (`compare()`'s own `t_multi_ms > 0` guard), but not yet a
+    compelling demo number either. Recorded as a new gap for CONTEXT.md, not fixed here:
+    wiring calibration into the live `Scheduler` is a `runtime/` change, outside this CLI
+    prompt's own DELIVERABLES.
     """
-    _run_gate("G7", ["agentdx", "analyze", "<run_id>", "--scorecard"])
+    run_id = _resolve_code_pipeline_run_id()
+    _run_gate("G7", ["agentdx", "analyze", run_id, "--scorecard"])
 
 
 @pytest.mark.acceptance

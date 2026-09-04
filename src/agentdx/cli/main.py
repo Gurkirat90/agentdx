@@ -25,10 +25,13 @@ import typer
 from agentdx.cli._config import GlobalOptions
 from agentdx.cli._output import Output
 from agentdx.cli._target import find_repo_root
+from agentdx.cli.commands import analyze as analyze_cmd
+from agentdx.cli.commands import compare as compare_cmd
 from agentdx.cli.commands import doctor as doctor_cmd
 from agentdx.cli.commands import instrument as instrument_cmd
 from agentdx.cli.commands import run as run_cmd
 from agentdx.cli.commands import scenario as scenario_cmd
+from agentdx.cli.commands import scenario_run as scenario_run_cmd
 from agentdx.cli.commands import version as version_cmd
 
 
@@ -136,6 +139,7 @@ app.command(name="version")(version_cmd.version)
 scenario_app.command(name="validate")(scenario_cmd.scenario_validate)
 scenario_app.command(name="list")(scenario_cmd.scenario_list)
 scenario_app.command(name="expand")(scenario_cmd.scenario_expand)
+scenario_app.command(name="run")(scenario_run_cmd.scenario_run)
 
 
 @app.command()
@@ -144,16 +148,8 @@ def replay() -> None:
     _not_implemented("replay", "P17 (deferred — see NOT DONE/RISKS)")
 
 
-@app.command()
-def analyze() -> None:
-    """Re-run the analysers over a sealed log, producing a new analysis version."""
-    _not_implemented("analyze", "P17 (deferred — see NOT DONE/RISKS)")
-
-
-@app.command()
-def compare() -> None:
-    """Report metric deltas, findings added or removed, and verdict change between two runs."""
-    _not_implemented("compare", "P17 (deferred — see NOT DONE/RISKS)")
+app.command(name="analyze")(analyze_cmd.analyze)
+app.command(name="compare")(compare_cmd.compare)
 
 
 @app.command(name="export")

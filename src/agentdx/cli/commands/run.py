@@ -75,10 +75,12 @@ from agentdx.scenario.assertions import (
     AssertionResult,
     AssertionStatus,
     RunSummary,
+    eval_findings_type_count,
     evaluate_assertion,
     load_success_check,
     run_python_success_check,
 )
+from agentdx.scenario.schema import Comparison, parse_comparison
 from agentdx.sdk.generic import CacheMissError, RunResult, hash_text, install_runtime
 from agentdx.store.sqlite import Store
 
@@ -185,6 +187,52 @@ def _parse_fault_spec(spec: str) -> dict[str, object]:
         "at_virtual_ts": at_virtual_ts,
         "recoverable": False,
     }
+
+
+def _parse_assert_expr(expr: str) -> tuple[str, Comparison]:
+    """Parse one `--assert PATH OP VALUE` CLI expression (direct-target mode).
+
+    A deliberately small, CLI-only mechanism — like `--faults`, PRD §37.1's own `agentdx run`
+    flag list gives no grammar for `--assert` at all; its only textual source is PRD §44.1's
+    G1 gate command, `agentdx run fixtures/code_pipeline --assert findings.race >= 1`. Declared
+    here rather than hidden: `docs/cli.md` states this is CLI-invented syntax, same as
+    `--faults`. Splits on whitespace into exactly three tokens (`PATH`, `OP`, `VALUE`) and reuses
+    `scenario.schema.parse_comparison` for the `OP VALUE` half, so the accepted operators and
+    number format are the single source of truth already governing every scenario YAML
+    `cmp:`/comparison field, not a second, silently-divergent copy.
+
+    Currently only `findings.<type-or-alias>` paths are supported (`eval_findings_type_count`
+    in `scenario/assertions.py` does the actual evaluation) — no other path shape has a PRD
+    citation or a test to validate against, so none is invented speculatively.
+    """
+    parts = expr.split()
+    if len(parts) != 3:
+        msg = f"--assert {expr!r} must be 'PATH OP VALUE', e.g. 'findings.race >= 1'"
+        raise TargetError("E-TARGET-009", msg)
+    path, op, value = parts
+    comparison = parse_comparison(f"{op} {value}")
+    if comparison is None:
+        msg = f"--assert {expr!r}: {op!r} {value!r} is not a valid comparison"
+        raise TargetError("E-TARGET-009", msg)
+    if not path.startswith("findings."):
+        msg = (
+            f"--assert {expr!r}: only 'findings.<type>' paths are supported currently, got {path!r}"
+        )
+        raise TargetError("E-TARGET-009", msg)
+    return path, comparison
+
+
+def _eval_assert_exprs(
+    assert_exprs: list[tuple[str, Comparison]], run: RunSummary
+) -> list[AssertionResult]:
+    """Evaluate every parsed `--assert` expression against one run's `RunSummary`."""
+    results = []
+    for path, comparison in assert_exprs:
+        finding_type = path.removeprefix("findings.")
+        results.append(
+            eval_findings_type_count(run, finding_type=finding_type, comparison=comparison)
+        )
+    return results
 
 
 async def _execute_one(
@@ -303,6 +351,7 @@ def _score_one(
     run_result: RunResult,
     events: tuple[Event, ...],
     scenario: LoadedScenario | None,
+    assert_exprs: list[tuple[str, Comparison]] = [],  # noqa: B006 - never mutated, only read
 ) -> tuple[AnalysisResult, CliRunSummary, tuple[AssertionResult, ...]]:
     analysis = analyze_events(events)
     opened = host.opened
@@ -338,11 +387,16 @@ def _score_one(
         for item in assertion_items:
             if isinstance(item, str | dict):
                 results.append(evaluate_assertion(item, _as_run_summary(summary)))
+    results.extend(_eval_assert_exprs(assert_exprs, _as_run_summary(summary)))
     return analysis, summary, tuple(results)
 
 
 def _score_reused(
-    *, run_id: str, events: tuple[Event, ...], scenario: LoadedScenario | None
+    *,
+    run_id: str,
+    events: tuple[Event, ...],
+    scenario: LoadedScenario | None,
+    assert_exprs: list[tuple[str, Comparison]] = [],  # noqa: B006 - never mutated, only read
 ) -> tuple[AnalysisResult, CliRunSummary, tuple[AssertionResult, ...]]:
     """Reconstruct a sealed run's own scorecard/findings/assertions from its stored log.
 
@@ -380,6 +434,7 @@ def _score_reused(
         for item in assertion_items:
             if isinstance(item, str | dict):
                 results.append(evaluate_assertion(item, _as_run_summary(summary)))
+    results.extend(_eval_assert_exprs(assert_exprs, _as_run_summary(summary)))
     return analysis, summary, tuple(results)
 
 
@@ -495,6 +550,20 @@ def run(
             ),
         ),
     ] = None,
+    assert_exprs_raw: Annotated[
+        list[str],
+        typer.Option(
+            "--assert",
+            help=(
+                "PATH OP VALUE, e.g. 'findings.race >= 1' — CLI-invented shorthand for a "
+                "quick single-run assertion (PRD §44.1's G1 gate is its own only textual "
+                "source; no PRD §37.1 grammar defines it, same class of addition as "
+                "--faults). Repeatable; each one adds to the run's own assertion results "
+                "and can fail the exit code exactly as a scenario file's assertions: block "
+                "does. Currently only 'findings.<type-or-alias>' paths are supported."
+            ),
+        ),
+    ] = [],  # noqa: B006 - Typer requires a literal default to derive the option's type
 ) -> None:
     """Execute a target under the deterministic scheduler and print the scorecard."""
     options: GlobalOptions = ctx.obj["options"]
@@ -507,6 +576,11 @@ def run(
     if ci_format not in ("junit+json", "junit", "json", "github"):
         out_writer.error(f"--format must be junit|json|github, got {ci_format!r}")
         raise typer.Exit(code=USAGE_ERROR)
+    try:
+        assert_exprs = [_parse_assert_expr(expr) for expr in assert_exprs_raw]
+    except TargetError as exc:
+        out_writer.error(str(exc))
+        raise typer.Exit(code=USAGE_ERROR) from exc
     try:
         config = resolve_config(options)
     except Exception as exc:
@@ -528,6 +602,7 @@ def run(
                 baseline_run=baseline_run,
                 config=config,
                 out=out_writer,
+                assert_exprs=assert_exprs,
             )
         )
     except TargetError as exc:
@@ -553,6 +628,7 @@ async def _async_run(
     baseline_run: Path | None,
     config: AgentDXConfig,
     out: Output,
+    assert_exprs: list[tuple[str, Comparison]] = [],  # noqa: B006 - never mutated, only read
 ) -> int:
     if baseline:
         out.warn(
@@ -579,6 +655,7 @@ async def _async_run(
                         config=config,
                         store=store,
                         out=out,
+                        assert_exprs=assert_exprs,
                     )
                 )
         else:
@@ -592,6 +669,7 @@ async def _async_run(
                     config=config,
                     store=store,
                     out=out,
+                    assert_exprs=assert_exprs,
                 )
             )
     finally:
@@ -612,6 +690,7 @@ async def _run_direct_target(
     config: AgentDXConfig,
     store: Store,
     out: Output,
+    assert_exprs: list[tuple[str, Comparison]] = [],  # noqa: B006 - never mutated, only read
 ) -> _RunOutcome:
     graph_target = resolve_target(target, task=task)
     faults = [_parse_fault_spec(spec) for spec in fault_specs]
@@ -631,6 +710,8 @@ async def _run_direct_target(
         config=config,
         store=store,
         out=out,
+        assert_exprs=assert_exprs,
+        direct_target_name=graph_target.fixture_name or target,
     )
 
 
@@ -643,6 +724,7 @@ async def _run_scenario_file(
     config: AgentDXConfig,
     store: Store,
     out: Output,
+    assert_exprs: list[tuple[str, Comparison]] = [],  # noqa: B006 - never mutated, only read
 ) -> _RunOutcome:
     scenario = load_and_validate(path)
     resolved = scenario.resolved
@@ -701,6 +783,7 @@ async def _run_scenario_file(
         config=config,
         store=store,
         out=out,
+        assert_exprs=assert_exprs,
     )
 
 
@@ -719,12 +802,26 @@ async def _run_and_score(
     config: AgentDXConfig,
     store: Store,
     out: Output,
+    assert_exprs: list[tuple[str, Comparison]] = [],  # noqa: B006 - never mutated, only read
+    direct_target_name: str | None = None,
 ) -> _RunOutcome:
+    """Run one target and score it.
+
+    `direct_target_name` populates `run_start.payload.scenario_id` (an existing, nullable
+    field — never a schema change) for a direct-target run that has no scenario document of
+    its own (`scenario is None`). Without this, a bare `agentdx run code_pipeline` leaves
+    `scenario_id` permanently `None`, and nothing durable in the sealed log says which
+    fixture a `run_id` came from — a real gap `compare --baseline`/`analyze --scorecard`
+    (PRD §44.1 G6/G7) hit directly: both need to trace a stored `run_id` back to its target
+    to know which `BaselineExecutor` graph to run. A scenario-file run already carries its
+    own real `scenario.scenario_id` and takes precedence; this only fills the direct-target
+    gap, so no existing consumer's `scenario_id` value changes.
+    """
     try:
         host, run_result, events = await _execute_one(
             graph=graph,
             task_text=task_text,
-            scenario_id=scenario.scenario_id if scenario is not None else None,
+            scenario_id=(scenario.scenario_id if scenario is not None else direct_target_name),
             scenario_hash=scenario_hash,
             graph_hash=graph_hash,
             seed=seed,
@@ -745,7 +842,7 @@ async def _run_and_score(
         run_id = exc.record.run_id
         events = tuple(store.read_events(run_id))
         analysis, summary, assertions = _score_reused(
-            run_id=run_id, events=events, scenario=scenario
+            run_id=run_id, events=events, scenario=scenario, assert_exprs=assert_exprs
         )
         failed = [a for a in assertions if a.status == AssertionStatus.FAILED]
         status = "failed" if failed else "passed"
@@ -784,7 +881,11 @@ async def _run_and_score(
         )
 
     analysis, summary, assertions = _score_one(
-        host=host, run_result=run_result, events=events, scenario=scenario
+        host=host,
+        run_result=run_result,
+        events=events,
+        scenario=scenario,
+        assert_exprs=assert_exprs,
     )
     failed = [a for a in assertions if a.status == AssertionStatus.FAILED]
     status = "failed" if failed else "passed"

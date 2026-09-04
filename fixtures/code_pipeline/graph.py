@@ -12,6 +12,31 @@ seeded defect gate G1 requires: a `state_conflict/write_write` on `draft.module_
 `coder` also writes `draft.module_b` (uncontested — nobody else touches it), and `reviewer`
 writes `review_notes` (also uncontested), so both PRD §23.1 state keys exist in the log without
 either one being a second race.
+
+## `single_agent` / `build_baseline_graph` — the PRD §17.2 `BaselineExecutor`, for this fixture
+
+Added for gates G6/G7 (`agentdx compare --baseline`, `agentdx analyze --scorecard`): a
+concrete, deterministic single-agent counterpart to `build_graph()` above, so
+`analysis.baseline.BaselineExecutor` has something real to execute for `code_pipeline`
+without a live model call. **Why this is legitimate rather than a guess (same footing as
+this file's own `coder`/`reviewer`/`tester`, ADR-012's precedent):** none of the three P05
+fixtures' agents call an LLM at all (`fixtures/_harness.py`'s `ResponsePool`, "not an LLM
+cache" — every one of `coder`/`reviewer`/`tester` is hardcoded Python driven by the same
+content-addressed tool-response pool). A single-agent baseline for this fixture is therefore
+scripted the identical way, not prompted — `cli/_baseline.py`'s `CliBaselineExecutor` runs
+this graph directly and does not read `BaselineRunSpec.system_prompt` (there is no model to
+prompt). `single_agent` performs the task in one pass, with no second writer to race:
+`read_file` once, then applies the same corrective guard `reviewer` already contributed above
+(the pool's already-committed `write_draft` entry for that exact revision — `content_len=97`
+— reused verbatim rather than inventing new pool data, since these are canned strings either
+way, not model output), then `run_tests`/`lint`. It deliberately does **not** also write
+`coder`'s uncontested `module_b.py` side task: that was never part of `TASK`'s own stated
+scope ("Refactor module_a.py so normalise() handles None and its tests pass"), and a lone
+agent focused on the actual task has no reason to invent unscoped work — so the baseline
+does *less* total tool-call work than the three-agent original (4 calls vs. 7), which is
+real, structural coordination overhead (duplicate `module_a.py` writes from the race, plus
+the unscoped `module_b.py` detour), not a fabricated deficit. See `docs/baseline-
+methodology.md` for the general design; this note is the fixture-specific instance of it.
 """
 
 from __future__ import annotations
@@ -158,9 +183,50 @@ def build_graph() -> agentdx.InstrumentedGraph:
     return agentdx.instrument(compiled, name="code_pipeline")
 
 
+async def single_agent(state: PipelineState) -> dict[str, Any]:
+    """Baseline: one agent does the whole task in sequence — no fan-out, no second writer.
+
+    See the module docstring's "`single_agent` / `build_baseline_graph`" note for why this
+    is scripted rather than prompted, and why it deliberately calls fewer tools than the
+    three-agent original. `draft.module_a`'s single write is therefore never contested — the
+    structural absence of the race this fixture's multi-agent graph seeds on purpose.
+    """
+    original = await read_file("module_a.py")
+    revised = original + "# reviewer: guard against None explicitly\n"
+    await write_draft("module_a.py", revised)
+    async with agentdx.state() as s:
+        await s.write("draft.module_a", "SINGLE_AGENT_REVISION:\n" + revised)
+
+    result = await run_tests("module_a")
+    await lint("module_a")
+    async with agentdx.state() as s:
+        await s.write("test_results", result)
+    return {}
+
+
+def build_baseline_graph() -> agentdx.InstrumentedGraph:
+    """Compile and instrument the single-agent baseline graph (PRD §17.2, §24.3's executor).
+
+    One node, no fan-out, no handoff — the exact structural contrast this comparison exists
+    to measure (PRD §17's headline feature). Built here, next to `build_graph`, so the
+    baseline's tool calls are the same already-tested functions the multi-agent graph calls,
+    reusing this fixture's own committed response pool rather than inventing new fixture
+    data (module docstring; ADR-012 precedent).
+    """
+    from langgraph.graph import END, START, StateGraph
+
+    builder = StateGraph(PipelineState)
+    builder.add_node("single_agent", single_agent)
+    builder.add_edge(START, "single_agent")
+    builder.add_edge("single_agent", END)
+    compiled = builder.compile()
+    return agentdx.instrument(compiled, name="code_pipeline_baseline")
+
+
 __all__ = [
     "FIXTURE_DIR",
     "TASK",
+    "build_baseline_graph",
     "build_graph",
     "coder",
     "lint",
@@ -168,6 +234,7 @@ __all__ = [
     "read_file",
     "reviewer",
     "run_tests",
+    "single_agent",
     "tester",
     "write_draft",
 ]

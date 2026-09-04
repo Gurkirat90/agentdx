@@ -413,6 +413,43 @@ def eval_deterministic_replay(run: RunSummary) -> AssertionResult:
     )
 
 
+#: Aliases the CLI's ad-hoc `agentdx run --assert findings.<X> <op> <value>` shorthand
+#: accepts for a `Finding.type` value that reads awkwardly written literally. Not a PRD
+#: §21.7 concept (see `eval_findings_type_count`'s own docstring for the full account) —
+#: `"race"` is `analysis/race.py`'s own name for the module that produces `state_conflict`
+#: findings; confirmed against every `fixtures/*/golden_findings.json`, none of which ever
+#: emits a literal `"race"` type, before adding this alias rather than guessing at it.
+_FINDING_TYPE_ALIASES: Final[dict[str, str]] = {"race": "state_conflict"}
+
+
+def eval_findings_type_count(
+    run: RunSummary, *, finding_type: str, comparison: Comparison
+) -> AssertionResult:
+    """Pass iff the count of findings with the given `type` satisfies `comparison`.
+
+    **Not one of PRD §21.7's nine built-in assertions above** — this is the evaluator behind
+    `agentdx run`'s own `--assert PATH OP VALUE` flag, a CLI-only mechanism for a single
+    direct-target run with no scenario file at all (PRD §44.1's G1 gate text is its only
+    textual source: `agentdx run fixtures/code_pipeline --assert findings.race >= 1`; no
+    grammar for it appears in PRD §37.1's own `agentdx run` flag list, nor in this module's
+    §21.7 table — the same class of PRD-internal gap `d78-plan.md`/CONTEXT.md's own D-series
+    entries have documented before rather than silently papering over. `cli/commands/run.py`'s
+    `_parse_assert_expr` is the thin, CLI-only "PATH OP VALUE" string splitter that calls this
+    function; this function is where the actual finding-counting logic lives, per this
+    package's "zero business logic in cli/" rule (`cli/commands/run.py`'s own module
+    docstring)). `finding_type` is resolved through `_FINDING_TYPE_ALIASES` first, so
+    `findings.race` and `findings.state_conflict` are two spellings of the identical check.
+    """
+    resolved_type = _FINDING_TYPE_ALIASES.get(finding_type, finding_type)
+    count = sum(1 for f in run.findings if f.type == resolved_type)
+    assertion_id = f"findings.{finding_type}"
+    passed = comparison.evaluate(float(count))
+    status = AssertionStatus.PASSED if passed else AssertionStatus.FAILED
+    return AssertionResult(
+        assertion_id, status, f"{count} finding(s) of type {resolved_type!r} vs. {comparison}"
+    )
+
+
 def evaluate_assertion(item: str | dict[str, object], run: RunSummary) -> AssertionResult:
     """Evaluate one already-`validate()`-passed assertion entry (bare name or `{name: params}`).
 
@@ -477,6 +514,7 @@ __all__ = [
     "SuccessCheckLoadError",
     "eval_critical_path_share",
     "eval_deterministic_replay",
+    "eval_findings_type_count",
     "eval_max_findings",
     "eval_no_silent_failures",
     "eval_no_state_conflicts",
