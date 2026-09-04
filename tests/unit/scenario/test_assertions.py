@@ -263,3 +263,81 @@ def test_run_shell_success_check_timeout_is_config_driven(monkeypatch: pytest.Mo
     assert result.status == assertions.AssertionStatus.FAILED
     assert "timed out after 1s" in result.detail
     assert "timed out" in result.detail
+
+
+# ---------------------------------------------------------------------------------------
+# eval_findings_type_count / is_known_finding_type — third OP-2 pass, finding #1
+# (op2-audit-p08-third.md): a mistyped or fictional finding type used to count zero matches
+# silently and evaluate the comparison as if that zero were a real answer, not "not a real
+# type." Before this fix, none of these cases had any direct unit coverage at all — every
+# existing test of `--assert` went through the full CLI and one real fixture.
+# ---------------------------------------------------------------------------------------
+
+
+def test_eval_findings_type_count_matches_the_exact_type() -> None:
+    run = _FakeRunSummary(findings=(_FakeFinding("state_conflict", "critical", (5,)),))
+    result = assertions.eval_findings_type_count(
+        run, finding_type="state_conflict", comparison=parse_comparison(">= 1")
+    )
+    assert result.status == assertions.AssertionStatus.PASSED
+    assert "1 finding(s) of type 'state_conflict'" in result.detail
+
+
+def test_eval_findings_type_count_resolves_the_race_alias() -> None:
+    """`findings.race` and `findings.state_conflict` must be two spellings of one check."""
+    run = _FakeRunSummary(findings=(_FakeFinding("state_conflict", "critical", (5,)),))
+    result = assertions.eval_findings_type_count(
+        run, finding_type="race", comparison=parse_comparison(">= 1")
+    )
+    assert result.status == assertions.AssertionStatus.PASSED
+    assert result.assertion_id == "findings.race"
+
+
+def test_eval_findings_type_count_rejects_a_mistyped_type_instead_of_silently_passing() -> None:
+    """The exact defect this finding demonstrated live against a real fixture.
+
+    A typo that happens to name this module's own built-in assertion (`no_state_conflicts`)
+    must not be treated as a real finding type that simply has zero matches — it must be
+    rejected outright, even though the run below has a real critical `state_conflict` finding
+    that a correctly-spelled assertion would (and must) fail against.
+    """
+    run = _FakeRunSummary(findings=(_FakeFinding("state_conflict", "critical", (5,)),))
+    with pytest.raises(ValueError, match="unknown finding type 'no_state_conflicts'"):
+        assertions.eval_findings_type_count(
+            run, finding_type="no_state_conflicts", comparison=parse_comparison("<= 0")
+        )
+
+
+def test_eval_findings_type_count_rejects_any_fictional_type() -> None:
+    run = _FakeRunSummary()
+    with pytest.raises(ValueError, match="unknown finding type 'totally_made_up'"):
+        assertions.eval_findings_type_count(
+            run, finding_type="totally_made_up", comparison=parse_comparison(">= 0")
+        )
+
+
+@pytest.mark.parametrize(
+    ("finding_type", "expected"),
+    [
+        ("state_conflict", True),
+        ("coordination_bottleneck", True),
+        ("redundancy", True),
+        ("race", True),  # alias
+        ("no_state_conflicts", False),  # the demonstrated typo
+        ("silent_failure", False),  # a DegradationClass member, never a real Finding.type
+        ("", False),
+        ("STATE_CONFLICT", False),  # case-sensitive, no normalization
+    ],
+)
+def test_is_known_finding_type(finding_type: str, expected: bool) -> None:
+    assert assertions.is_known_finding_type(finding_type) is expected
+
+
+def test_known_finding_type_spellings_is_sorted_and_covers_types_and_aliases() -> None:
+    spellings = assertions.known_finding_type_spellings()
+    assert spellings == tuple(sorted(spellings))
+    assert "state_conflict" in spellings
+    assert "coordination_bottleneck" in spellings
+    assert "redundancy" in spellings
+    assert "race" in spellings
+    assert "silent_failure" not in spellings

@@ -421,6 +421,59 @@ def eval_deterministic_replay(run: RunSummary) -> AssertionResult:
 #: emits a literal `"race"` type, before adding this alias rather than guessing at it.
 _FINDING_TYPE_ALIASES: Final[dict[str, str]] = {"race": "state_conflict"}
 
+#: The `Finding.type` values this build's analysis layer can actually produce — cross-checked
+#: directly against every constructor, not guessed: `analysis/race.py:128`
+#: (`FINDING_TYPE: Final = "state_conflict"`, the value the one `Finding(...)` call site there
+#: uses), `analysis/verdict.py:433,456` (`type="coordination_bottleneck"`),
+#: `analysis/verdict.py:489` (`type="redundancy"`). Deliberately **not** `"silent_failure"` —
+#: `analysis/resilience.py:111`'s `SILENT_FAILURE` is a `DegradationClass` member (PRD §19.5's
+#: fault-run degradation classification, unrelated to a `Finding`), and no `Finding`/
+#: `VerdictFinding` construction anywhere in `analysis/` uses it as a `type` value. A hardcoded
+#: literal set, not an import from `analysis/` — `scenario/` has no layer dependencies
+#: (import-linter's own "scenario/ is a declarative surface with no layer dependencies"
+#: contract) — the same reason `Finding`/`RunSummary` above are `Protocol`s rather than
+#: concrete imports. If `analysis/` ever grows a new finding type, this set goes stale silently
+#: (a real, accepted limit — see `is_known_finding_type`'s own docstring); it does not go
+#: *unsafely* stale, since an unrecognized type still fails loudly rather than passing vacuously.
+_KNOWN_FINDING_TYPES: Final[frozenset[str]] = frozenset(
+    {"state_conflict", "coordination_bottleneck", "redundancy"}
+)
+
+
+def is_known_finding_type(finding_type: str) -> bool:
+    """Return whether `finding_type` (bare or alias-resolved) names a real, producible type.
+
+    Resolves through `_FINDING_TYPE_ALIASES` first, then checks `_KNOWN_FINDING_TYPES`.
+
+    Exists so a caller can reject an unknown or mistyped finding type *before* trusting a zero
+    count from it — `sum(1 for f in findings if f.type == finding_type)` is `0` for both "no
+    findings of a real type" and "not a real type at all," and those two cases must never be
+    conflated (OP-2 third-pass finding #1, `op2-audit-p08-third.md`: a single mistyped
+    `--assert findings.no_state_conflicts <= 0` — confusing the finding-type name with this
+    module's own built-in assertion name it resembles — silently reported PASSED on a run with
+    a real, seeded, critical `state_conflict` finding). `cli.commands.run._parse_assert_expr`
+    calls this to reject the typo as a `USAGE_ERROR` before the run ever executes, and
+    `eval_findings_type_count` below calls it again itself as defense in depth, so a future
+    caller that reaches this function some other way still cannot get a silent false pass.
+
+    **Accepted limit, not silently hidden**: this can only know about finding types someone
+    remembered to add to `_KNOWN_FINDING_TYPES` above. A new finding type introduced in
+    `analysis/` without updating this set makes `--assert findings.<new-type>` reject as
+    unknown rather than work — a loud, fixable failure, not the silent wrong-answer this
+    function exists to prevent.
+    """
+    return _FINDING_TYPE_ALIASES.get(finding_type, finding_type) in _KNOWN_FINDING_TYPES
+
+
+def known_finding_type_spellings() -> tuple[str, ...]:
+    """Return every valid `findings.<X>` spelling, sorted — real types plus aliases.
+
+    For error messages only (e.g. `cli.commands.run._parse_assert_expr` listing valid options
+    on an unknown-type rejection) — a caller checking validity should use
+    `is_known_finding_type` instead of testing membership in this tuple.
+    """
+    return tuple(sorted(_KNOWN_FINDING_TYPES | _FINDING_TYPE_ALIASES.keys()))
+
 
 def eval_findings_type_count(
     run: RunSummary, *, finding_type: str, comparison: Comparison
@@ -439,7 +492,18 @@ def eval_findings_type_count(
     package's "zero business logic in cli/" rule (`cli/commands/run.py`'s own module
     docstring)). `finding_type` is resolved through `_FINDING_TYPE_ALIASES` first, so
     `findings.race` and `findings.state_conflict` are two spellings of the identical check.
+
+    Raises `ValueError` if `finding_type` is not `is_known_finding_type` — defense in depth;
+    `cli.commands.run._parse_assert_expr` already rejects this earlier, before any run starts,
+    so a caller going through the CLI never reaches this branch in practice.
     """
+    if not is_known_finding_type(finding_type):
+        detail = (
+            f"unknown finding type {finding_type!r} in 'findings.{finding_type}' — not one of "
+            f"this build's real finding types {sorted(_KNOWN_FINDING_TYPES)!r} or the aliases "
+            f"{sorted(_FINDING_TYPE_ALIASES)!r}"
+        )
+        raise ValueError(detail)
     resolved_type = _FINDING_TYPE_ALIASES.get(finding_type, finding_type)
     count = sum(1 for f in run.findings if f.type == resolved_type)
     assertion_id = f"findings.{finding_type}"
@@ -523,6 +587,8 @@ __all__ = [
     "eval_task_success",
     "eval_token_cost_multiplier",
     "evaluate_assertion",
+    "is_known_finding_type",
+    "known_finding_type_spellings",
     "load_success_check",
     "run_python_success_check",
     "run_shell_success_check",

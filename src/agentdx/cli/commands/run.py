@@ -77,6 +77,8 @@ from agentdx.scenario.assertions import (
     RunSummary,
     eval_findings_type_count,
     evaluate_assertion,
+    is_known_finding_type,
+    known_finding_type_spellings,
     load_success_check,
     run_python_success_check,
 )
@@ -203,7 +205,15 @@ def _parse_assert_expr(expr: str) -> tuple[str, Comparison]:
 
     Currently only `findings.<type-or-alias>` paths are supported (`eval_findings_type_count`
     in `scenario/assertions.py` does the actual evaluation) — no other path shape has a PRD
-    citation or a test to validate against, so none is invented speculatively.
+    citation or a test to validate against, so none is invented speculatively. The finding
+    type itself is validated here too, against `scenario.assertions.is_known_finding_type` —
+    before any run executes, so a typo is a `USAGE_ERROR` immediately rather than a silent
+    vacuous PASS discovered only after the run finishes (OP-2 third-pass finding #1 against
+    `scenario/`, `op2-audit-p08-third.md`: `--assert "findings.no_state_conflicts <= 0"` — a
+    natural typo, confusing the finding-type name with this module's own built-in assertion
+    name it resembles — used to report PASSED on a run with a real, seeded `state_conflict`
+    finding, because a nonexistent type always counts zero matches, and `<= 0`/`>= 0` are true
+    for zero regardless of whether the type is real).
     """
     parts = expr.split()
     if len(parts) != 3:
@@ -217,6 +227,13 @@ def _parse_assert_expr(expr: str) -> tuple[str, Comparison]:
     if not path.startswith("findings."):
         msg = (
             f"--assert {expr!r}: only 'findings.<type>' paths are supported currently, got {path!r}"
+        )
+        raise TargetError("E-TARGET-009", msg)
+    finding_type = path.removeprefix("findings.")
+    if not is_known_finding_type(finding_type):
+        msg = (
+            f"--assert {expr!r}: {finding_type!r} is not a finding type this build's analysis "
+            f"layer produces — use one of {known_finding_type_spellings()!r}"
         )
         raise TargetError("E-TARGET-009", msg)
     return path, comparison
