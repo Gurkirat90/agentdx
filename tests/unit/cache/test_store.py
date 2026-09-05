@@ -357,6 +357,38 @@ def test_a_hand_edited_response_body_fails_integrity_verification(tmp_path: Path
     store.close()
 
 
+def test_a_non_numeric_integer_column_raises_cache_store_error_not_value_error(
+    tmp_path: Path,
+) -> None:
+    """A hand-tampered `prompt_tokens` holding a non-numeric string raises `E-CACHE-002`.
+
+    OP-2 audit finding #2 (`op2-audit-p07-second.md`, second independent audit of this
+    module): `_as_int`'s `isinstance(value, str): return int(value)` branch was unguarded —
+    SQLite's `INTEGER` affinity does not reject a string it cannot convert (it stores it as
+    `TEXT` instead), so this is a real, reachable corruption shape, not a hypothetical, and it
+    raised a raw `ValueError` instead of the documented `CacheStoreError`, violating
+    `SqliteCacheStore`'s own class-level guarantee that every method either succeeds or raises
+    `CacheStoreError`. Demonstrated live by the audit against the real, shipped class before
+    this fix; this test is that same repro, promoted into the suite.
+    """
+    path = tmp_path / "cache.db"
+    store = SqliteCacheStore.open(path)
+    key = _put(store)
+    store.close()
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "UPDATE llm_cache SET prompt_tokens = ? WHERE cache_key = ?",
+        ("not-a-number", key),
+    )
+    conn.commit()
+    conn.close()
+    store = SqliteCacheStore.open(path)
+    with pytest.raises(CacheStoreError) as excinfo:
+        store.lookup_entry(key)
+    assert excinfo.value.code == "E-CACHE-002"
+    store.close()
+
+
 def test_iter_all_also_verifies_integrity(tmp_path: Path) -> None:
     """A full scan (`iter_all`) catches corruption in a row `lookup` was never asked about."""
     path = tmp_path / "cache.db"

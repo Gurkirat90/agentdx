@@ -87,20 +87,32 @@ prompt's `DELIVERABLES`) computes its own key inline and does not call this modu
 file is touched — the same shape of gap `docs/cache.md` §8 already declares for
 `key_material`. Declared here, not silently left implicit.
 
-**A value with no reproducible representation raises rather than hashing an address.**
-`_as_payload_value`/`_normalise_part` used to fall back to ``hash_text(repr(value))`` for
-anything outside the closed set below — and a plain Python object's default ``__repr__``
-embeds its **memory address**, which differs every process. That made the cache key
-process-local for exactly the kind of value the type signature (`Mapping[str, object]`)
-explicitly allows a caller to pass (a multimodal part, a tool-call artefact). This mirrors a
-real, already-shipped defence in the same codebase — `sdk/generic.py`'s `stable_text` detects
-this exact case and raises `E-INSTR-008` instead of hashing an address. This module could not
-reuse that function (`runtime/` must not import `sdk/`) so it duplicates the detection here
-and raises `KeyMaterialError` (`E-CACHE-011`) under the same condition, rather than silently
-degrading I1. `set`/`frozenset` values are sorted by their own stable encoding before joining
-the key (a set's iteration order is not a contract — AGENTS.md §4.1's `sorted_set` clause,
-duplicated here in spirit since `runtime/cache/` is not on `check_determinism_hygiene.py`'s
-`ALLOWLIST` and does not construct any `set` itself, only sorts one it is handed).
+**A value outside the closed set of representable types raises unconditionally — it is never
+hashed via its own `repr()` at all.** `_as_payload_value`/`_normalise_part` used to fall back
+to ``hash_text(repr(value))`` for anything outside the closed set below, guarded by a regex
+that tried to detect whether that `repr()` embedded a memory address (CPython's default
+`__repr__` shape, `" at 0x..."`). **This guard was found defeatable** (OP-2 audit,
+`op2-audit-p07-second.md` finding #1, second independent audit of this module, demonstrated
+live): a value with a hand-written `__repr__` that still embeds the same process-local
+`id()`, just in a different textual shape (e.g. `f"Obj({id(self)})"`), sailed straight through
+unblocked — including, in one live run, a **spurious cache-key collision** between two
+genuinely different logical calls once CPython reused a freed object's address for a new one,
+which is worse than the original bug's mere cross-process divergence: a false *hit* silently
+serves the wrong recorded response. Pattern-matching `repr()` output is an unbounded,
+adversarial-input problem with no complete regex, so the policy is now inverted: the closed
+set `_as_payload_value` already handles explicitly (`None`/`bool`/`int`/`str`/`float`/
+`bytes`/`bytearray`/`Mapping`/`Sequence`/`set`/`frozenset`) is the *only* set of types this
+module considers to have a provably reproducible representation; anything else is refused by
+`_reject_unrepresentable`, raising `KeyMaterialError` (`E-CACHE-011`) unconditionally,
+regardless of what its own `repr()` happens to contain. This is strictly more conservative
+than the pattern it replaces and mirrors, in spirit rather than mechanism now, the same
+already-shipped defence `sdk/generic.py`'s `stable_text` provides (`E-INSTR-008`) — that
+function was not itself re-verified by this audit and may carry the identical bypass, flagged
+there as a cross-reference for whoever next touches that file. `set`/`frozenset` values are
+sorted by their own stable encoding before joining the key (a set's iteration order is not a
+contract — AGENTS.md §4.1's `sorted_set` clause, duplicated here in spirit since
+`runtime/cache/` is not on `check_determinism_hygiene.py`'s `ALLOWLIST` and does not construct
+any `set` itself, only sorts one it is handed).
 
 **No ambient time, uuid or randomness.** This file is not on
 `scripts/check_determinism_hygiene.py`'s `ALLOWLIST` and does not need to be: every input here
@@ -110,20 +122,14 @@ comes from the caller's own arguments, and the only hashing primitive used
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping, Sequence
 from hashlib import blake2b
-from typing import Final
+from typing import Final, NoReturn
 
 from agentdx.events.canonical import DIGEST_SIZE, HASH_PREFIX, encode_value
 from agentdx.events.schema import PayloadValue
 
 _DOCS: Final = "docs/cache.md"
-
-_ADDRESS: Final = re.compile(r" at 0x[0-9a-fA-F]+")
-"""Matches the address CPython's default `__repr__` embeds. A value whose representation
-contains one cannot be hashed reproducibly — see the module docstring's note on
-`KeyMaterialError`, and `sdk/generic.py`'s `stable_text`, which this pattern mirrors."""
 
 KEY_VERSION: Final = 2
 """PRD §11.4. Included in every key's material (`key_material_for`'s `"key_version"` field),
@@ -183,28 +189,33 @@ def hash_text(text: str) -> str:
     return HASH_PREFIX + blake2b(text.encode("utf-8"), digest_size=DIGEST_SIZE).hexdigest()
 
 
-def _reproducible_repr(value: object) -> str:
-    """Return `repr(value)`, or raise `KeyMaterialError` if it embeds a memory address.
+def _reject_unrepresentable(value: object) -> NoReturn:
+    """Raise `KeyMaterialError` for a value outside the closed set of representable types.
 
-    Guarantees: never returns a string whose reproducibility depends on this process's
-    memory layout. This is the one place non-`PayloadValue` values reach the key; every
-    caller below routes through here rather than calling `repr()` directly.
+    Guarantees: never inspects `repr(value)` at all — this is the one place a value that
+    reached neither `_as_payload_value`'s nor `_normalise_part`'s explicit type branches is
+    handled; every such call is refused unconditionally rather than pattern-matched. A prior
+    version of this function instead hashed `repr(value)` after checking it did not match
+    CPython's default `__repr__` address shape (`" at 0x..."`) — found defeatable by a custom
+    `__repr__` embedding the same process-local `id()` in any other textual form
+    (`op2-audit-p07-second.md` finding #1, demonstrated live, including a genuine spurious
+    same-key collision between two different logical calls). See the module docstring for the
+    full account.
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` the value's `repr()` embeds a memory address.
+        KeyMaterialError: `E-CACHE-011`, always — every call to this function is a refusal.
     """
-    text = repr(value)
-    if _ADDRESS.search(text):
-        detail = (
-            f"a value of type {type(value).__name__} has no reproducible representation "
-            f"(its repr embeds a memory address), so the cache key would differ between "
-            f"processes for the identical logical call — this is what PRD §11.4's 'the key "
-            f"never contains a machine-local salt' guarantee forbids. Give the type a stable "
-            f"__repr__, or convert it to a plain value (str/int/bool/list/dict) before "
-            f"passing it as message content or a significant param"
-        )
-        raise KeyMaterialError("E-CACHE-011", detail)
-    return text
+    detail = (
+        f"a value of type {type(value).__name__} is outside the closed set of types this "
+        f"cache key can represent reproducibly (None/bool/int/str/float/bytes/bytearray/"
+        f"Mapping/Sequence/set/frozenset) — this is refused unconditionally rather than "
+        f"hashing its repr(), since a custom __repr__ can embed process-local information "
+        f"(e.g. id()) in a shape no pattern match can fully rule out; this is what PRD §11.4's "
+        f"'the key never contains a machine-local salt' guarantee forbids. Convert it to a "
+        f"plain value (str/int/bool/list/dict) before passing it as message content or a "
+        f"significant param"
+    )
+    raise KeyMaterialError("E-CACHE-011", detail)
 
 
 def _normalise_part(part: object, redact: Callable[[str], str] | None) -> PayloadValue:
@@ -216,7 +227,7 @@ def _normalise_part(part: object, redact: Callable[[str], str] | None) -> Payloa
     PRD §11.4's "represent images/audio by content digest."
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` — see `_reproducible_repr`.
+        KeyMaterialError: `E-CACHE-011` — see `_reject_unrepresentable`.
     """
     if isinstance(part, Mapping):
         text = part.get("text")
@@ -231,7 +242,7 @@ def _normalise_part(part: object, redact: Callable[[str], str] | None) -> Payloa
     if isinstance(part, str):
         stripped = part.strip()
         return redact(stripped) if redact else stripped
-    return {"type": "unknown", "digest": hash_text(_reproducible_repr(part))}
+    _reject_unrepresentable(part)
 
 
 def _as_payload_value(value: object) -> PayloadValue:
@@ -241,13 +252,15 @@ def _as_payload_value(value: object) -> PayloadValue:
     ``f"float:{value!r}"`` (Python's float `repr` is itself reproducible — see the module
     docstring; only its *embedding format* differs from the SDK's); `bytes`/`bytearray`
     become ``"bytes:<hex>"``; `Mapping`/`Sequence` recurse; `set`/`frozenset` are sorted by
-    their own stable encoding first, since iteration order is not a contract. Anything else
-    is folded into a content digest of its `repr()`.
+    their own stable encoding first, since iteration order is not a contract. Anything outside
+    this closed set of types is refused unconditionally, never hashed via its own `repr()`.
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` the value's `repr()` has no reproducible
-            representation (see `_reproducible_repr`) — this replaces a prior version of this
-            function that silently hashed the address instead.
+        KeyMaterialError: `E-CACHE-011` — value is outside the closed set of representable
+            types (see `_reject_unrepresentable`). A prior version of this function instead
+            hashed the value's `repr()` after a regex check for a memory-address shape, found
+            defeatable (`op2-audit-p07-second.md` finding #1) and replaced with an
+            unconditional refusal.
     """
     if value is None or isinstance(value, bool | int | str):
         return value
@@ -262,7 +275,7 @@ def _as_payload_value(value: object) -> PayloadValue:
         return ordered
     if isinstance(value, Sequence):
         return [_as_payload_value(v) for v in value]
-    return {"type": "unknown", "digest": hash_text(_reproducible_repr(value))}
+    _reject_unrepresentable(value)
 
 
 def normalise_messages(
@@ -285,7 +298,7 @@ def normalise_messages(
             are out of scope for this specific PRD sentence.
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` — see `_reproducible_repr`.
+        KeyMaterialError: `E-CACHE-011` — see `_reject_unrepresentable`.
     """
     out: list[dict[str, PayloadValue]] = []
     for message in messages:
@@ -312,7 +325,7 @@ def params_hash_for(params: Mapping[str, object]) -> str:
     differ only in prompt.
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` — see `_reproducible_repr`.
+        KeyMaterialError: `E-CACHE-011` — see `_reject_unrepresentable`.
     """
     material: dict[str, PayloadValue] = {
         k: _as_payload_value(params[k]) for k in SIGNIFICANT_PARAMS if k in params
@@ -346,7 +359,7 @@ def key_material_for(
             correct — a redacted prompt is a different prompt.
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` — see `_reproducible_repr`.
+        KeyMaterialError: `E-CACHE-011` — see `_reject_unrepresentable`.
     """
     return {
         "model": model,
@@ -377,7 +390,7 @@ def key_material_json(
     without a debugger — design constraint 1.
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` — see `_reproducible_repr`.
+        KeyMaterialError: `E-CACHE-011` — see `_reject_unrepresentable`.
     """
     return encode_value(
         key_material_for(
@@ -409,7 +422,7 @@ def cache_key_for(
     values).
 
     Raises:
-        KeyMaterialError: `E-CACHE-011` — see `_reproducible_repr`.
+        KeyMaterialError: `E-CACHE-011` — see `_reject_unrepresentable`.
     """
     return hash_text(
         key_material_json(

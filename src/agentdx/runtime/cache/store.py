@@ -554,6 +554,18 @@ def _as_int(value: object, *, default: int = 0) -> int:
     A small, strictly-typed narrowing helper: a raw SQLite column value is `object` as far as
     `mypy --strict` is concerned, and `int(object)` is not a valid overload — this function is
     the one place that narrows it, rather than a `# type: ignore` at every call site.
+
+    Raises:
+        CacheStoreError: `E-CACHE-002` — the value is neither `None`, `bool`, `int`, nor a
+            string that parses as one. SQLite's `INTEGER` affinity does not reject a string it
+            cannot convert (it stores it as `TEXT` instead), so a hand-tampered or otherwise
+            corrupted integer column can genuinely reach this function holding a non-numeric
+            string; `int(value)` on that string is caught here rather than left to raise a raw
+            `ValueError`, which would violate this module's own class-level guarantee that
+            every method either succeeds or raises `CacheStoreError` — no other exception type
+            escapes (`op2-audit-p07-second.md` finding #2, demonstrated live against a real
+            hand-tampered row: a non-numeric string in `prompt_tokens` raised `ValueError`
+            uncaught, not `CacheStoreError`, before this fix).
     """
     if value is None:
         return default
@@ -562,7 +574,11 @@ def _as_int(value: object, *, default: int = 0) -> int:
     if isinstance(value, int):
         return value
     if isinstance(value, str):
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:
+            detail = f"expected an integer column value, got a non-numeric string: {value!r}"
+            raise CacheStoreError("E-CACHE-002", detail) from None
     detail = f"expected an integer column value, got {type(value).__name__}: {value!r}"
     raise CacheStoreError("E-CACHE-002", detail)
 

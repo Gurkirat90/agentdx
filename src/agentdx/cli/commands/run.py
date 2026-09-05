@@ -61,7 +61,6 @@ from agentdx.cli.host import (
     RunAlreadyExistsError,
     RunIdCollisionError,
     build_cache,
-    build_cache_hook,
     build_fault_hooks,
 )
 from agentdx.config import AgentDXConfig
@@ -332,7 +331,14 @@ async def _execute_one(
         run_mode=run_mode,
         cache=cache,
     )
-    build_cache_hook(cache=cache, config=config)  # wired for a future scheduler cache_hook call
+    # PRD §11.3's virtual-duration chain (Scheduler(cache_hook=...) -> on_llm_yield) is not
+    # wired here: `Scheduler(...)` above is constructed before `cache` even exists, and no
+    # construction site in this tree passes `cache_hook=` — a real, disclosed gap
+    # (docs/cache.md §8/§9, docs/cli.md), out of this command's own scope to close unilaterally
+    # (runtime/scheduler.py, not cli/, would need the call site). A prior version of this line
+    # called `build_cache_hook(cache=cache, config=config)` and discarded the result — dead
+    # code that read, on a skim, like the gap had been addressed; removed rather than left,
+    # since it did nothing and was actively misleading (op2-audit-p07-second.md finding #4).
     previous_host = install_runtime(host)
     try:
         result = await scheduler.run(
