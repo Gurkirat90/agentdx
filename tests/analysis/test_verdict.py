@@ -28,11 +28,17 @@ from agentdx.analysis.baseline import (
 )
 from agentdx.analysis.overhead import OverheadDecomposition
 from agentdx.analysis.redundancy import RedundancyGroup
-from agentdx.analysis.resilience import ResilienceResult
+from agentdx.analysis.resilience import (
+    DegradationClass,
+    FaultRunStatus,
+    FaultScore,
+    ResilienceResult,
+)
 from agentdx.analysis.verdict import (
     Confidence,
     EmptyEvidenceError,
     Evidence,
+    Severity,
     VerdictClass,
     load_verdict_rules,
     verdict,
@@ -154,16 +160,51 @@ def _redundancy_group(*, wasted_ms: int = 5) -> RedundancyGroup:
     )
 
 
-def _resilience(*, score: int | None = 80, silent_failure_capped: bool = False) -> ResilienceResult:
+def _resilience(
+    *,
+    score: int | None = 80,
+    silent_failure_capped: bool = False,
+    per_fault: tuple[FaultScore, ...] = (),
+) -> ResilienceResult:
     return ResilienceResult(
         resilience_score=score,
         worst_fault_score=score,
         n_faults=1,
-        per_fault=(),
+        per_fault=per_fault,
         not_fired=(),
         aborted=(),
         silent_failure_capped=silent_failure_capped,
         evidence_seq=(1,),
+    )
+
+
+def _fault_score(
+    *,
+    fault_id: str = "f-1",
+    fault_label: str = "agent_crash(reviewer)",
+    degradation_class: DegradationClass | None = DegradationClass.SILENT_FAILURE,
+    score: float | None = 15.0,
+    evidence_seq: tuple[int, ...] = (1, 2, 3),
+) -> FaultScore:
+    """A minimal, `SCORED`-shaped `FaultScore` — enough for `_resilience_findings` (OP-2, P11).
+
+    Fields `_resilience_findings` never reads are filled with plausible-but-unchecked
+    placeholders.
+    """
+    return FaultScore(
+        fault_id=fault_id,
+        fault_label=fault_label,
+        status=FaultRunStatus.SCORED,
+        success_ratio=0.1,
+        recovery_component=0.0,
+        recovery_time_virtual_ms=None,
+        amplification=1.0,
+        amplification_component=1.0,
+        retries_base=0,
+        retries_fault=0,
+        degradation_class=degradation_class,
+        score=score,
+        evidence_seq=evidence_seq,
     )
 
 
@@ -250,6 +291,36 @@ def test_state_conflict_risk_fires_on_a_high_severity_finding() -> None:
         span_count=10,
     )
     assert result.verdict_class is VerdictClass.STATE_CONFLICT_RISK
+
+
+def test_a_high_severity_conflict_does_not_erase_beneficial_from_secondary_classes() -> None:
+    """OP-2 second-pass finding #3.
+
+    PRD §18.1 gives `BENEFICIAL` a "no *critical* findings" exclusion — narrower than
+    `STATE_CONFLICT_RISK`'s own "high-or-critical" trigger. A single `HIGH` (not `CRITICAL`)
+    state-conflict finding must not silently drop `BENEFICIAL` out of `secondary_classes`, even
+    though `STATE_CONFLICT_RISK` correctly still wins the headline.
+    """
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5),  # comfortably >= beneficial_min_speedup
+        state_conflict_findings=(_conflict_finding("high"),),
+        agent_count=2,
+        span_count=10,
+    )
+    assert result.verdict_class is VerdictClass.STATE_CONFLICT_RISK
+    assert VerdictClass.BENEFICIAL in result.secondary_classes
+
+
+def test_a_critical_severity_conflict_does_still_exclude_beneficial() -> None:
+    """The other half of finding #3's fix: PRD's own `critical`-only exclusion must still hold."""
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5),
+        state_conflict_findings=(_conflict_finding("critical"),),
+        agent_count=2,
+        span_count=10,
+    )
+    assert result.verdict_class is VerdictClass.STATE_CONFLICT_RISK
+    assert VerdictClass.BENEFICIAL not in result.secondary_classes
 
 
 def test_state_conflict_risk_ignores_low_and_medium_severity() -> None:
@@ -427,6 +498,97 @@ def test_precedence_state_conflict_risk_beats_coordination_bottleneck() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
+# Resilience findings (PRD §19.5 / §18.3) — OP-2 second-pass finding #2
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_silent_failure_becomes_a_critical_verdict_finding() -> None:
+    """The audit's own live demonstration: `verdict.findings` must name the silent failure.
+
+    Before the fix, `verdict_class` was correctly `UNRELIABLE_TOPOLOGY` but `findings` was
+    empty — a caller rendering findings had nothing naming *which* fault silently failed.
+    """
+    silent = _fault_score(
+        fault_id="f-silent",
+        fault_label="agent_crash(reviewer)",
+        degradation_class=DegradationClass.SILENT_FAILURE,
+        score=15.0,
+        evidence_seq=(1, 2, 3),
+    )
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5),
+        resilience=_resilience(score=15, silent_failure_capped=True, per_fault=(silent,)),
+        agent_count=2,
+        span_count=10,
+    )
+    assert result.verdict_class is VerdictClass.UNRELIABLE_TOPOLOGY
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.type == "resilience_degradation"
+    assert finding.severity is Severity.CRITICAL
+    assert finding.evidence.event_seqs == (1, 2, 3)
+    assert "f-silent" in finding.finding_id
+    assert "agent_crash(reviewer)" in finding.claim
+
+
+def test_a_hard_failure_becomes_a_high_severity_verdict_finding() -> None:
+    hard = _fault_score(
+        fault_id="f-hard",
+        fault_label="dependency_down(db)",
+        degradation_class=DegradationClass.HARD_FAILURE,
+        score=40.0,
+        evidence_seq=(5, 6),
+    )
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5),
+        resilience=_resilience(score=40, per_fault=(hard,)),
+        agent_count=2,
+        span_count=10,
+    )
+    findings = [f for f in result.findings if f.type == "resilience_degradation"]
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.HIGH
+    assert findings[0].evidence.event_seqs == (5, 6)
+
+
+def test_a_graceful_fault_produces_no_resilience_finding() -> None:
+    graceful = _fault_score(
+        fault_id="f-graceful",
+        degradation_class=DegradationClass.GRACEFUL,
+        score=95.0,
+    )
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5),
+        resilience=_resilience(score=95, per_fault=(graceful,)),
+        agent_count=2,
+        span_count=10,
+    )
+    assert not any(f.type == "resilience_degradation" for f in result.findings)
+
+
+def test_a_not_fired_or_aborted_fault_produces_no_resilience_finding() -> None:
+    """`degradation_class is None` (never scored) must not crash or produce a finding."""
+    not_fired = _fault_score(
+        fault_id="f-not-fired",
+        degradation_class=None,
+        score=None,
+        evidence_seq=(),
+    )
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5),
+        resilience=_resilience(score=80, per_fault=(not_fired,)),
+        agent_count=2,
+        span_count=10,
+    )
+    assert not any(f.type == "resilience_degradation" for f in result.findings)
+
+
+def test_resilience_none_produces_no_resilience_finding() -> None:
+    result = verdict(comparison=_comparison(achieved_speedup=1.5), agent_count=2, span_count=10)
+    assert not any(f.type == "resilience_degradation" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------------------------
 # The coordination score (PRD §18.2)
 # ---------------------------------------------------------------------------------------------
 
@@ -536,6 +698,49 @@ def test_confidence_medium_on_instrumentation_gaps() -> None:
         agent_count=2,
         span_count=10,
         instrumentation_gap_count=1,
+    )
+    assert result.confidence is Confidence.MEDIUM
+
+
+def test_confidence_drops_to_low_past_the_configured_instrumentation_gap_ceiling() -> None:
+    """OP-2 second-pass finding #4.
+
+    `medium_max_instrumentation_gaps` (default 2) was loaded but never consulted — 1 gap and
+    1,000 gaps both reported `MEDIUM`. Past the configured ceiling, confidence must drop to LOW.
+    """
+    at_ceiling = verdict(
+        comparison=_comparison(achieved_speedup=1.5, grade=ComparabilityGrade.A),
+        decomposition=_decomposition(residual_fraction=0.01),
+        agent_count=2,
+        span_count=10,
+        instrumentation_gap_count=2,  # == default medium_max_instrumentation_gaps
+    )
+    assert at_ceiling.confidence is Confidence.MEDIUM
+
+    past_ceiling = verdict(
+        comparison=_comparison(achieved_speedup=1.5, grade=ComparabilityGrade.A),
+        decomposition=_decomposition(residual_fraction=0.01),
+        agent_count=2,
+        span_count=10,
+        instrumentation_gap_count=3,  # > default medium_max_instrumentation_gaps
+    )
+    assert past_ceiling.confidence is Confidence.LOW
+
+
+def test_confidence_instrumentation_gap_ceiling_is_driven_by_the_configured_rule() -> None:
+    """A threshold change visibly changes the outcome.
+
+    The same discipline as `test_a_threshold_change_visibly_changes_the_verdict_class`, applied
+    to finding #4's fix.
+    """
+    rules = replace(load_verdict_rules(), medium_max_instrumentation_gaps=10)
+    result = verdict(
+        comparison=_comparison(achieved_speedup=1.5, grade=ComparabilityGrade.A),
+        decomposition=_decomposition(residual_fraction=0.01),
+        agent_count=2,
+        span_count=10,
+        instrumentation_gap_count=3,  # > default(2) but well within the raised ceiling
+        rules=rules,
     )
     assert result.confidence is Confidence.MEDIUM
 

@@ -55,7 +55,7 @@ keeping the hand arithmetic in the two new tests below tractable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 
 import pytest
@@ -412,8 +412,36 @@ def _baseline_run(
     cache_reuse_rate: float,
     outcome: BaselineOutcome = BaselineOutcome.COMPLETED,
 ) -> BaselineRun:
+    """Build a `BaselineRun` whose own `events` genuinely reflect `model`/`tools`.
+
+    `assess_comparability` reads the baseline's *observed* `run_start`/`tool_call` events, not
+    `spec` (OP-2 second-pass finding #1, `op2-audit-p11-second.md` — comparing against `spec`
+    was a tautology, since `generate_baseline` derives `spec` from the multi-agent run itself).
+    `spec` is still populated here (it is the real request `generate_baseline` would have made,
+    and other tests/callers read it), but it is `events` — built with `dataclasses.replace` over
+    the shared `run_start`/`tool_call` factories — that now actually drives the grading this
+    helper's callers are testing.
+    """
+    baseline_run_start = run_start(seq=0, virtual_ts_ms=0)
+    baseline_events: tuple[Event, ...] = (
+        replace(baseline_run_start, payload={**baseline_run_start.payload, "model": model}),
+        *(
+            tool_call(
+                seq=i + 1,
+                virtual_ts_ms=i + 1,
+                vclock={"baseline": i + 1},
+                causal_parents=[0],
+                agent_id="baseline",
+                span_id="B",
+                tool=tool,
+                args_hash="blake2b:" + "a" * 64,
+                duration_virtual_ms=1,
+            )
+            for i, tool in enumerate(tools)
+        ),
+    )
     return BaselineRun(
-        events=(),
+        events=baseline_events,
         baseline_of="r_test01",
         spec=BaselineRunSpec(
             task="t",
@@ -475,6 +503,53 @@ def test_assess_comparability_grade_c_tool_set_mismatch() -> None:
     assert result.grade is ComparabilityGrade.C
     assert not result.tools_match
     assert "tool set mismatch" in result.reason
+
+
+def test_assess_comparability_detects_a_real_model_mismatch_through_generate_baseline() -> None:
+    """OP-2 second-pass finding #1 (`op2-audit-p11-second.md`), fixed and proven end-to-end.
+
+    Before the fix, `assess_comparability` compared `baseline.spec.model` against the
+    multi-agent run — but `generate_baseline` derives `spec.model` *from that same multi-agent
+    run*, so the comparison was a tautology: an executor that silently ran under a completely
+    different model could never be caught. This test goes through the real
+    `generate_baseline` -> `assess_comparability` pipeline (not the hand-built `_baseline_run`
+    helper above), with a `_FakeExecutor` whose *returned events* — not its `spec` — carry a
+    genuinely different model, exactly the audit's own live demonstration. Before the fix this
+    passed with `model_match=True`, "identical model/tools/task"; after the fix it correctly
+    grades C.
+    """
+    multi_events = _comparability_multi_events()  # model "test-model", tools ("search",)
+    baseline_run_start = run_start(seq=100, virtual_ts_ms=0)
+    baseline_events = (
+        replace(baseline_run_start, payload={**baseline_run_start.payload, "model": "gpt-4-turbo"}),
+        tool_call(
+            seq=101,
+            virtual_ts_ms=1,
+            vclock={"baseline": 1},
+            causal_parents=[100],
+            agent_id="baseline",
+            span_id="B",
+            tool="search",
+            args_hash="blake2b:" + "a" * 64,
+            duration_virtual_ms=1,
+        ),
+    )
+    executor = _FakeExecutor(
+        result=BaselineExecutionResult(events=baseline_events, outcome=BaselineOutcome.COMPLETED)
+    )
+
+    run = generate_baseline(multi_events, task="do the thing", executor=executor)
+    # generate_baseline's own tautology, unchanged and expected: spec.model is derived FROM
+    # the multi-agent run, so it agrees with it by construction — spec is a request, not an
+    # observation, and this is exactly why assess_comparability must not read it.
+    assert run.spec.model == "test-model"
+
+    result = assess_comparability(multi_events, run)
+
+    assert not result.model_match, "the genuinely different executed model must be detected"
+    assert result.grade is ComparabilityGrade.C
+    assert "model mismatch" in result.reason
+    assert "gpt-4-turbo" in result.reason  # names the ACTUAL observed model, not the request
 
 
 def test_assess_comparability_grade_c_baseline_failed_never_hidden() -> None:
@@ -576,26 +651,44 @@ def _fanout_log() -> list[Event]:
 
 
 def _fanout_baseline() -> BaselineRun:
+    """A single-agent baseline whose own events genuinely use the same tool as `_fanout_log`.
+
+    `assess_comparability` reads `tools_match` from the baseline's own recorded `tool_call`
+    events, not from `spec` (OP-2 second-pass finding #1, `op2-audit-p11-second.md`) — a
+    baseline with no `tool_call` at all would now, correctly, grade C on a real tool-set
+    mismatch, which is not what these `compare()`/`format_scorecard()` tests are about.
+    """
     multi_events = _fanout_log()
     baseline_events: tuple[Event, ...] = (
         run_start(seq=100, virtual_ts_ms=0),
-        llm_call(
+        tool_call(
             seq=101,
             virtual_ts_ms=1,
             vclock={"solo": 1},
             causal_parents=[100],
             agent_id="solo",
             span_id="S1",
+            tool="search",
+            args_hash="blake2b:" + "a" * 64,
+            duration_virtual_ms=1,
+        ),
+        llm_call(
+            seq=102,
+            virtual_ts_ms=2,
+            vclock={"solo": 2},
+            causal_parents=[101],
+            agent_id="solo",
+            span_id="S1",
             prompt_tokens=150,
             completion_tokens=70,
         ),
         run_end(
-            seq=102,
+            seq=103,
             virtual_ts_ms=22,
             vclock={"_run": 2},
-            causal_parents=[101],
+            causal_parents=[102],
             virtual_makespan_ms=22,
-            event_count=3,
+            event_count=4,
         ),
     )
     return BaselineRun(
@@ -716,6 +809,11 @@ def _chain_log() -> list[Event]:
 
 
 def _chain_baseline() -> BaselineRun:
+    """A single-agent baseline whose own events genuinely use the same tool as `_chain_log`.
+
+    See `_fanout_baseline`'s docstring — the same OP-2 second-pass finding #1 reasoning
+    applies here.
+    """
     multi_events = _chain_log()
     baseline_events: tuple[Event, ...] = (
         run_start(seq=100, virtual_ts_ms=0),
@@ -729,13 +827,24 @@ def _chain_baseline() -> BaselineRun:
             prompt_tokens=100,
             completion_tokens=50,
         ),
-        run_end(
+        tool_call(
             seq=102,
+            virtual_ts_ms=2,
+            vclock={"solo": 2},
+            causal_parents=[101],
+            agent_id="solo",
+            span_id="S1",
+            tool="execute",
+            args_hash="blake2b:" + "a" * 64,
+            duration_virtual_ms=1,
+        ),
+        run_end(
+            seq=103,
             virtual_ts_ms=38,
             vclock={"_run": 2},
-            causal_parents=[101],
+            causal_parents=[102],
             virtual_makespan_ms=38,
-            event_count=3,
+            event_count=4,
         ),
     )
     return BaselineRun(

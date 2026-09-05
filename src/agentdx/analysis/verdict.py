@@ -58,7 +58,7 @@ from agentdx.analysis.aggregates import AgentAggregate, EdgeAggregate
 from agentdx.analysis.baseline import BaselineComparison, BaselineOutcome, ComparabilityGrade
 from agentdx.analysis.overhead import OverheadDecomposition, TotalWorkDecomposition
 from agentdx.analysis.redundancy import RedundancyGroup
-from agentdx.analysis.resilience import ResilienceResult
+from agentdx.analysis.resilience import DegradationClass, ResilienceResult
 from agentdx.analysis.timing import ParallelismMetrics
 
 _DOCS: Final = "docs/baseline-methodology.md"
@@ -174,6 +174,38 @@ class EmptyEvidenceError(VerdictAnalysisError):
         """Build the fixed message for this one, specific, always-identical failure."""
         super().__init__(
             "E-VERD-001", "an Evidence with an empty event_seqs array is rejected (I6, PRD §18.4)"
+        )
+
+
+class DuplicateThresholdKeyError(VerdictAnalysisError):
+    """Raised when one key is declared, with disagreeing values, in two `[verdict.*]` subtables.
+
+    OP-2 second-pass finding #5 (`op2-audit-p11-second.md`): `load_verdict_rules`'s merge loop
+    used to let whichever subtable was processed last silently win a same-name collision, with
+    no validation that the two subtables agreed — a config-authoring trap for any key (like
+    `coordination_bottleneck_edge_cp_share`, real today: declared under both `[verdict.classes]`
+    and `[verdict.severity]`, which are two different PRD-numbered sections but exactly one
+    `VerdictRules` field) that legitimately has only one meaning despite living under two
+    section headers. Raised only when the two values actually disagree — the committed file's
+    current duplicate happens to agree (`0.40` in both places today), so this never fires against
+    the real, shipped TOML; it exists to catch the day someone edits one copy and not the other.
+    """
+
+    def __init__(
+        self,
+        key: str,
+        first_section: str,
+        first_value: float | int,
+        second_section: str,
+        second_value: float | int,
+    ) -> None:
+        """Build the error naming both conflicting subtables and their disagreeing values."""
+        super().__init__(
+            "E-VERD-002",
+            f"{key!r} is declared in both [verdict.{first_section}] ({first_value!r}) and "
+            f"[verdict.{second_section}] ({second_value!r}) with different values — one flat "
+            "VerdictRules field cannot honor both (OP-2 second-pass finding #5, "
+            "op2-audit-p11-second.md)",
         )
 
 
@@ -354,10 +386,35 @@ def load_verdict_rules() -> VerdictRules:
     confidence = verdict_section.get("confidence", {}) if isinstance(verdict_section, dict) else {}
     recs = verdict_section.get("recommendations", {}) if isinstance(verdict_section, dict) else {}
     merged: dict[str, float | int] = dict(_DEFAULTS)
-    for section in (classes, score_section, severity, confidence, recs):
+    # OP-2 second-pass finding #5 (`op2-audit-p11-second.md`): these five subtables merge into
+    # one flat-by-name dict. A key declared in two subtables (real today:
+    # `coordination_bottleneck_edge_cp_share`, in both `[verdict.classes]` and
+    # `[verdict.severity]`) used to let whichever subtable is iterated last silently win, with no
+    # check that the two agreed. `_first_seen` remembers which subtable set each key first, so a
+    # later subtable disagreeing on the same key is a hard `DuplicateThresholdKeyError` (this
+    # project's "assert it, report honestly" convention — `overhead.py`'s `E-OVHD-001`,
+    # `baseline.py`'s `E-BASE-002`) instead of a silent overwrite. Agreeing duplicates (the
+    # committed file's current state) are unaffected.
+    sections = (
+        ("classes", classes),
+        ("score", score_section),
+        ("severity", severity),
+        ("confidence", confidence),
+        ("recommendations", recs),
+    )
+    first_seen: dict[str, tuple[str, float | int]] = {}
+    for section_name, section in sections:
         if isinstance(section, dict):
             for key, value in section.items():
                 if key in merged and isinstance(value, int | float) and not isinstance(value, bool):
+                    if key in first_seen:
+                        prev_section, prev_value = first_seen[key]
+                        if prev_value != value:
+                            raise DuplicateThresholdKeyError(
+                                key, prev_section, prev_value, section_name, value
+                            )
+                    else:
+                        first_seen[key] = (section_name, value)
                     merged[key] = value
 
     return VerdictRules(
@@ -416,6 +473,21 @@ def format_rules(rules: VerdictRules) -> str:
 def _count_high_or_critical(findings: Sequence[StateConflictFinding]) -> int:
     high_or_critical = (Severity.HIGH.value, Severity.CRITICAL.value)
     return sum(1 for f in findings if f.type == "state_conflict" and f.severity in high_or_critical)
+
+
+def _count_critical(findings: Sequence[StateConflictFinding]) -> int:
+    """Count only `critical`-severity `state_conflict` findings.
+
+    Deliberately narrower than `_count_high_or_critical` (OP-2 second-pass finding #3,
+    `op2-audit-p11-second.md`): PRD §18.1 gives `STATE_CONFLICT_RISK` a high-or-critical trigger
+    but `BENEFICIAL`/`NEUTRAL` a strictly narrower "no *critical* findings" exclusion — two
+    PRD-distinct bars that must not share one count. Reusing `_count_high_or_critical` for both
+    let a single `HIGH` (not `CRITICAL`) finding silently drop `BENEFICIAL`/`NEUTRAL` out of
+    `secondary_classes` even though their own PRD-literal triggers stayed true.
+    """
+    return sum(
+        1 for f in findings if f.type == "state_conflict" and f.severity == Severity.CRITICAL.value
+    )
 
 
 def _coordination_bottleneck_findings(
@@ -499,6 +571,67 @@ def _redundancy_findings(
                     event_seqs=group.evidence_seq,
                     spans=tuple(group.member_node_ids),
                     computation="sum(durations) - max(duration) over the redundancy group",
+                ),
+                confidence=Confidence.HIGH.value,
+            )
+        )
+    return tuple(findings)
+
+
+def _resilience_findings(
+    resilience: ResilienceResult | None,
+    rules: VerdictRules,
+) -> tuple[VerdictFinding, ...]:
+    """Convert each critically-degraded `FaultScore` into a `VerdictFinding`.
+
+    OP-2 second-pass finding #2 (`op2-audit-p11-second.md`). Mirrors `_redundancy_findings`'s
+    shape: one finding per `FaultScore` whose `degradation_class` is `SILENT_FAILURE` or
+    `HARD_FAILURE` — PRD §19.5's two classes that are not simply "the system tried and told you"
+    (`GRACEFUL`) — with severity `CRITICAL` for `SILENT_FAILURE` (PRD §18.3's severity table
+    names it in the same row as a lost-update finding: "critical | Lost update with divergent
+    values; silent failure under fault; total failure") and `HIGH` for `HARD_FAILURE`.
+    `NOT_FIRED`/`ABORTED` faults carry `degradation_class is None` (never scored by
+    `resilience.score()`) and are skipped here the same way `resilience.score()`'s own
+    aggregation already excludes them (PRD §19.7).
+
+    Before this fix, a genuine `SILENT_FAILURE` — PRD §19.5's literal "worst outcome in the
+    model because it is the one that reaches users undetected" — never appeared in
+    `Verdict.findings` at all, even on a run whose headline class was correctly driven to
+    `UNRELIABLE_TOPOLOGY` by that same fault. `rules` is accepted for signature symmetry with
+    this module's other `_*_findings` functions; the severity mapping here is fixed directly by
+    PRD §18.3, not threshold-configurable, so it is otherwise unused.
+    """
+    findings: list[VerdictFinding] = []
+    if resilience is None:
+        return ()
+    for fault in resilience.per_fault:
+        if fault.degradation_class is DegradationClass.SILENT_FAILURE:
+            severity = Severity.CRITICAL
+            claim = (
+                f"{fault.fault_label} silently failed under fault: the run reported success "
+                f"while its own success check failed (fault score {fault.score or 0:.0f}/100)"
+            )
+        elif fault.degradation_class is DegradationClass.HARD_FAILURE:
+            severity = Severity.HIGH
+            claim = (
+                f"{fault.fault_label} failed under fault with no graceful degradation "
+                f"(fault score {fault.score or 0:.0f}/100)"
+            )
+        else:
+            continue
+        findings.append(
+            VerdictFinding(
+                finding_id=f"resilience-{fault.fault_id}",
+                type="resilience_degradation",
+                severity=severity,
+                claim=claim,
+                metric=Metric(
+                    name="resilience.fault_score", value=fault.score or 0.0, unit="score"
+                ),
+                evidence=Evidence(
+                    event_seqs=fault.evidence_seq,
+                    spans=(),
+                    computation="resilience.score()'s per-fault degradation_class classification",
                 ),
                 confidence=Confidence.HIGH.value,
             )
@@ -646,6 +779,10 @@ def _class_triggers(
     rules: VerdictRules,
 ) -> dict[VerdictClass, bool]:
     high_or_critical_conflicts = _count_high_or_critical(state_conflict_findings)
+    # PRD §18.1: BENEFICIAL/NEUTRAL's exclusion bar is "no critical findings" — narrower than
+    # STATE_CONFLICT_RISK's own high-or-critical trigger. A separate, critical-only count (OP-2
+    # second-pass finding #3) keeps the two bars from silently sharing one variable.
+    critical_conflicts = _count_critical(state_conflict_findings)
 
     unreliable = resilience is not None and (
         resilience.silent_failure_capped
@@ -686,14 +823,14 @@ def _class_triggers(
         and comparison.outcome_multi == "complete"
         and comparison.outcome_baseline is BaselineOutcome.COMPLETED
         and rules.neutral_min_speedup <= comparison.achieved_speedup < rules.beneficial_min_speedup
-        and high_or_critical_conflicts == 0
+        and critical_conflicts == 0
     )
     beneficial = (
         comparison is not None
         and comparison.outcome_multi == "complete"
         and comparison.outcome_baseline is BaselineOutcome.COMPLETED
         and comparison.achieved_speedup >= rules.beneficial_min_speedup
-        and high_or_critical_conflicts == 0
+        and critical_conflicts == 0
     )
     residual_fraction = decomposition.residual_fraction if decomposition is not None else 0.0
     insufficient_data = (
@@ -767,6 +904,10 @@ def _confidence(
         residual_fraction > rules.medium_max_residual_fraction
         or grade == ComparabilityGrade.C
         or comparison is None
+        # OP-2 second-pass finding #4 (`op2-audit-p11-second.md`): past the configured ceiling,
+        # instrumentation gaps degrade confidence past MEDIUM rather than capping out there
+        # forever — 1 gap and 1,000 gaps must not report the identical confidence.
+        or instrumentation_gap_count > rules.medium_max_instrumentation_gaps
     )
     if low:
         return Confidence.LOW
@@ -810,7 +951,9 @@ def verdict(
             `redundancy` findings use `RedundancyGroup.wasted_virtual_ms`/`wasted_tokens`
             directly, which do not need it).
         resilience: `resilience.score()`'s result, or `None` if no chaos run was executed
-            (PRD §18.2: "25 if no chaos run").
+            (PRD §18.2: "25 if no chaos run"). Also feeds `_resilience_findings` (OP-2
+            second-pass finding #2): a `SILENT_FAILURE`/`HARD_FAILURE` per-fault result becomes
+            its own `VerdictFinding`, not just the `UNRELIABLE_TOPOLOGY` headline trigger.
         edge_aggregates: `aggregates.compute_edge_aggregates()`'s result, for
             `COORDINATION_BOTTLENECK` and the merge recommendation.
         agent_aggregates: `aggregates.compute_agent_aggregates()`'s result, for
@@ -865,6 +1008,7 @@ def verdict(
         )
     )
     findings.extend(_redundancy_findings(redundancy_groups, total_work, active_rules))
+    findings.extend(_resilience_findings(resilience, active_rules))
 
     recommendations: list[Recommendation] = []
     recommendations.extend(
@@ -937,6 +1081,7 @@ def verdict(
 __all__ = [
     "SEVERITY_ORDER",
     "Confidence",
+    "DuplicateThresholdKeyError",
     "EmptyEvidenceError",
     "Evidence",
     "Metric",

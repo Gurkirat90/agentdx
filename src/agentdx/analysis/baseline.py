@@ -576,12 +576,28 @@ def assess_comparability(
     Task match is not assessed: `generate_baseline` always passes the caller's `task` through
     to `BaselineRunSpec` verbatim (PRD §17.1's "same task" requirement is satisfied by
     construction, not by comparison).
+
+    **Model/tool match, corrected (OP-2 second-pass finding #1, `op2-audit-p11-second.md`).**
+    Compares against `baseline.events`' own *recorded* `run_start`/`tool_call` events — what
+    the injected `BaselineExecutor` actually ran — never against `baseline.spec`. `spec` is
+    only the *request* `generate_baseline` made of the executor, and `spec.model`/`.tools` are
+    themselves derived from `multi_events` — comparing against `spec` therefore compared the
+    multi-agent run against itself, a tautology that could never detect a real mismatch (the
+    audit demonstrated this live: an executor that silently ran under a completely different
+    model still graded A, "identical model/tools/task"). A baseline whose events carry no
+    `run_start` at all reports an empty observed model (`""`), which correctly reads as a
+    mismatch against any real model name rather than silently matching by omission.
     """
     grade_a_min, grade_b_min = _load_comparability_thresholds()
     run_start = _run_start(multi_events)
     multi_model = _str_payload(run_start, "model") or ""
-    model_match = multi_model == baseline.spec.model
-    tools_match = sorted(multi_run_tools(multi_events)) == sorted(baseline.spec.tools)
+    baseline_run_start = next((e for e in baseline.events if e.type is EventType.RUN_START), None)
+    baseline_model = (
+        (_str_payload(baseline_run_start, "model") or "") if baseline_run_start is not None else ""
+    )
+    baseline_tools = multi_run_tools(baseline.events)
+    model_match = multi_model == baseline_model
+    tools_match = sorted(multi_run_tools(multi_events)) == sorted(baseline_tools)
 
     multi_end = _run_end(multi_events)
     multi_succeeded = multi_end is not None and _str_payload(multi_end, "status") == "complete"
@@ -598,7 +614,7 @@ def assess_comparability(
         )
     elif not model_match:
         grade = ComparabilityGrade.C
-        reason = f"model mismatch: multi-agent {multi_model!r} vs. baseline {baseline.spec.model!r}"
+        reason = f"model mismatch: multi-agent {multi_model!r} vs. baseline {baseline_model!r}"
     elif not tools_match:
         grade = ComparabilityGrade.C
         reason = "tool set mismatch between the multi-agent run and the baseline"

@@ -12,8 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import agentdx.analysis.verdict as verdict_module
 from agentdx.analysis.resilience import DegradationClass, load_resilience_rules
-from agentdx.analysis.verdict import format_rules, load_verdict_rules
+from agentdx.analysis.verdict import DuplicateThresholdKeyError, format_rules, load_verdict_rules
 
 _RULES_PATH = (
     Path(__file__).resolve().parents[2] / "src" / "agentdx" / "analysis" / "verdict_rules.toml"
@@ -84,6 +87,46 @@ def test_load_resilience_rules_values_match_the_committed_toml_verbatim() -> Non
     assert rules.degradation_weights[DegradationClass.DEGRADED_FLAGGED] == 0.6
     assert rules.degradation_weights[DegradationClass.HARD_FAILURE] == 0.4
     assert rules.degradation_weights[DegradationClass.SILENT_FAILURE] == 0.0
+
+
+def test_the_committed_files_duplicate_key_agrees_and_does_not_raise() -> None:
+    """The real, committed file's duplicate key must load cleanly, not raise.
+
+    `coordination_bottleneck_edge_cp_share` is declared in both `[verdict.classes]` and
+    `[verdict.severity]` — the real, committed file has both at `0.40` today, so
+    `load_verdict_rules()` must load cleanly (see the next test for the disagreeing-values case).
+    """
+    rules = load_verdict_rules()  # must not raise
+    assert rules.coordination_bottleneck_edge_cp_share == 0.40
+
+
+def test_load_verdict_rules_raises_when_a_duplicate_key_disagrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OP-2 second-pass finding #5 (`op2-audit-p11-second.md`).
+
+    `coordination_bottleneck_edge_cp_share` is declared under both `[verdict.classes]` and
+    `[verdict.severity]` — one flat `VerdictRules` field for a key present in two subtables. If
+    the two ever disagree, `load_verdict_rules` must fail loudly rather than let whichever
+    subtable is merged last silently win.
+    """
+    bad_toml = tmp_path / "verdict_rules.toml"
+    bad_toml.write_text(
+        "schema_version = 1\n"
+        "[verdict.classes]\n"
+        "coordination_bottleneck_edge_cp_share = 0.40\n"
+        "[verdict.severity]\n"
+        "coordination_bottleneck_edge_cp_share = 0.90\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(verdict_module, "_find_rules_path", lambda: bad_toml)
+
+    with pytest.raises(DuplicateThresholdKeyError) as excinfo:
+        verdict_module.load_verdict_rules()
+    assert excinfo.value.code == "E-VERD-002"
+    assert "coordination_bottleneck_edge_cp_share" in str(excinfo.value)
+    assert "0.4" in str(excinfo.value)
+    assert "0.9" in str(excinfo.value)
 
 
 def test_schema_version_is_present_and_an_integer() -> None:
