@@ -42,7 +42,7 @@ from agentdx.cli._exitcodes import (
     USAGE_ERROR,
 )
 from agentdx.cli._output import Output
-from agentdx.cli._runsummary import CliRunSummary
+from agentdx.cli._runsummary import CliRunSummary, combined_findings
 from agentdx.cli._scenario_io import (
     LoadedScenario,
     ScenarioLoadError,
@@ -379,7 +379,7 @@ def _score_one(
         faults_fired=faults_fired,
         success_check_passed=None,
         deterministic_replay_verified=None,
-        findings=tuple(analysis.race_findings),
+        findings=combined_findings(analysis),
     )
     resolved = scenario.resolved if scenario is not None else None
     success_check = resolved.get("success_check") if resolved is not None else None
@@ -442,7 +442,7 @@ def _score_reused(
         faults_fired=faults_fired,
         success_check_passed=None,
         deterministic_replay_verified=None,
-        findings=tuple(analysis.race_findings),
+        findings=combined_findings(analysis),
     )
     resolved = scenario.resolved if scenario is not None else None
     assertion_items = resolved.get("assertions", []) if resolved is not None else []
@@ -927,12 +927,25 @@ def _finish(
     baseline_run: Path | None,
     out: Output,
 ) -> int:
+    """Print/emit `outcomes` and return the process's overall exit code.
+
+    Two independent output contracts, not one — `--ci` (PRD §22.4, writes `summary.json`/
+    JUnit XML files under `--out`) and the global `--json` (PRD §37.3, one machine-readable
+    object to stdout, human prose moves to stderr) can be set together or separately, and
+    both are honoured when they are: `ci_mod.CiSummary` is the single JSON shape both draw
+    from (OP-2 first-pass finding #1 against `cli/`, `op2-audit-p17.md` — before this fix,
+    `--json` alone silently emitted nothing to stdout on this command, `--ci`'s own file
+    output being a different contract entirely was no substitute for it). The human-prose
+    loop still runs whenever `--ci` was not given, `--json` included — `Output.line()`
+    already correctly routes it to stderr under `json_mode` (`_output.py`'s own contract);
+    what was missing was ever writing the JSON object itself, not the prose routing.
+    """
     worst = OK
     for outcome in outcomes:
         if outcome.exit_code != OK:
             worst = outcome.exit_code if worst == OK else worst
 
-    if ci:
+    if ci or out.json_mode:
         scenario_outcomes = tuple(
             ci_mod.ScenarioOutcome(
                 scenario=o.scenario_name,
@@ -952,22 +965,25 @@ def _finish(
             duration_wall_s=0.0,
             scenarios=scenario_outcomes,
         )
-        # `ci_format` values "github" and "junit+json" (the default) both write both
-        # artefacts — "github" has no distinct renderer yet (`--format` option's own help
-        # text says so); "junit"/"json" write only the one named. See this response's NOT
-        # DONE/RISKS.
-        if ci_format in ("junit+json", "junit", "github"):
-            ci_mod.write_junit_xml(summary, out_dir)
-        if ci_format in ("junit+json", "json", "github"):
-            ci_mod.write_json_summary(summary, out_dir)
-        if baseline_run is not None and baseline_run.is_file():
-            baseline_summary = ci_mod.load_summary(baseline_run)
-            violations = ci_mod.check_regression(summary, baseline_summary)
-            if violations:
-                for v in violations:
-                    out.error(v.detail)
-                return ASSERTION_FAILURE
-        return worst
+        if ci:
+            # `ci_format` values "github" and "junit+json" (the default) both write both
+            # artefacts — "github" has no distinct renderer yet (`--format` option's own
+            # help text says so); "junit"/"json" write only the one named.
+            if ci_format in ("junit+json", "junit", "github"):
+                ci_mod.write_junit_xml(summary, out_dir)
+            if ci_format in ("junit+json", "json", "github"):
+                ci_mod.write_json_summary(summary, out_dir)
+            if baseline_run is not None and baseline_run.is_file():
+                baseline_summary = ci_mod.load_summary(baseline_run)
+                violations = ci_mod.check_regression(summary, baseline_summary)
+                if violations:
+                    for v in violations:
+                        out.error(v.detail)
+                    worst = ASSERTION_FAILURE
+        if out.json_mode:
+            out.emit_json(summary.as_dict())
+        if ci:
+            return worst
 
     for outcome in outcomes:
         _print_human_outcome(out, outcome)

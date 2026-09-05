@@ -138,6 +138,35 @@ def analyze(
             if analysis.comparison.comparability.grade.value == "C":
                 out.warn(f"comparability grade C: {analysis.comparison.comparability.reason}")
 
+        if out.json_mode:
+            # OP-2 first-pass finding #1 against `cli/` (`op2-audit-p17.md`): global `--json`
+            # previously emitted nothing to stdout on this command at all. `out.line()` above
+            # already routes to stderr under `json_mode` (`_output.py`'s own contract) — this
+            # is the missing other half, the actual machine-readable object.
+            result: dict[str, object] = {
+                "run_id": run_id,
+                "verdict_class": verdict.verdict_class.value,
+                "confidence": verdict.confidence.value,
+                "coordination_score": verdict.coordination_score,
+                "findings": [
+                    {"type": f.type, "severity": f.severity.value, "claim": f.claim}
+                    for f in verdict.findings
+                ],
+                "recommendations": [r.text for r in verdict.recommendations],
+            }
+            if scorecard and analysis.comparison is not None:
+                comparison = analysis.comparison
+                result["scorecard"] = {
+                    "achieved_speedup": comparison.achieved_speedup,
+                    "ideal_parallel_speedup": comparison.ideal_parallel_speedup,
+                    "overhead_cost": comparison.overhead_cost,
+                    "gap": comparison.gap,
+                    "token_cost_multiplier": comparison.token_cost_multiplier,
+                    "comparability_grade": comparison.comparability.grade.value,
+                    "comparability_reason": comparison.comparability.reason,
+                }
+            out.emit_json(result)
+
         out.coverage_statement()
         raise typer.Exit(code=OK)
     finally:

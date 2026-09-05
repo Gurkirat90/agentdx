@@ -18,6 +18,14 @@ not wired to `cli.ci.check_regression`'s tolerance engine in this pass (that eng
 store) — passing either with the two-run form prints a warning and is otherwise a no-op,
 the same honesty `run.py`'s own `--jobs`/`--fail-on` stubs already practice (never silently
 pretending to check a tolerance nothing computed).
+
+**Direct consequence, stated plainly (OP-2 first-pass finding #3 against `cli/`,
+`op2-audit-p17.md`).** Because no regression logic exists in the two-run form regardless of
+those flags, PRD §37.1's own documented exit contract for it ("0 no regression · 1 regression
+beyond tolerance") cannot be reached — `_print_two_run_diff` always exits `OK`. `--baseline`
+already has no pass/fail check of its own by design (see that function's own comment); the
+two-run form's lack of one is a real, not-yet-closed gap against the PRD text, disclosed via
+a runtime warning on every invocation rather than left implicit.
 """
 
 from __future__ import annotations
@@ -151,6 +159,8 @@ def _print_two_run_diff(
 ) -> int:
     analysis_a = analyze_events(events_a)
     analysis_b = analyze_events(events_b)
+    findings_a = len(analysis_a.race_findings) + len(analysis_a.verdict.findings)
+    findings_b = len(analysis_b.race_findings) + len(analysis_b.verdict.findings)
     out.line(out.style(f"{run_id_a}  vs.  {run_id_b}", bold=True))
     out.line(
         f"  verdict       {analysis_a.verdict.verdict_class.value:<24} "
@@ -160,13 +170,36 @@ def _print_two_run_diff(
         f"  score         {analysis_a.verdict.coordination_score!s:<24} "
         f"{analysis_b.verdict.coordination_score!s}"
     )
-    out.line(
-        f"  findings      {len(analysis_a.race_findings)!s:<24} {len(analysis_b.race_findings)!s}"
-    )
+    out.line(f"  findings      {findings_a!s:<24} {findings_b!s}")
     out.line(
         f"  makespan_ms   {analysis_a.dag.virtual_makespan_ms!s:<24} "
         f"{analysis_b.dag.virtual_makespan_ms!s}"
     )
+    # OP-2 first-pass finding #3 against `cli/` (`op2-audit-p17.md`): this form has no
+    # regression/tolerance logic at all — PRD §37.1 documents "exit 1: regression beyond
+    # tolerance" for `compare RUN_A RUN_B`, but nothing here ever computes one, so the exit
+    # code can never be anything but OK. Disclosed rather than silently inherited from the
+    # PRD's text, the same honesty `--tolerance-file`/`--force` already practice above.
+    out.warn(
+        "compare RUN_A RUN_B is informational only in this build — no regression tolerance "
+        "is evaluated, so the exit code is always 0 regardless of the deltas above"
+    )
+    if out.json_mode:
+        out.emit_json(
+            {
+                "run_id_a": run_id_a,
+                "run_id_b": run_id_b,
+                "verdict_class_a": analysis_a.verdict.verdict_class.value,
+                "verdict_class_b": analysis_b.verdict.verdict_class.value,
+                "coordination_score_a": analysis_a.verdict.coordination_score,
+                "coordination_score_b": analysis_b.verdict.coordination_score,
+                "findings_a": findings_a,
+                "findings_b": findings_b,
+                "makespan_ms_a": analysis_a.dag.virtual_makespan_ms,
+                "makespan_ms_b": analysis_b.dag.virtual_makespan_ms,
+                "regression_evaluated": False,
+            }
+        )
     out.coverage_statement()
     return OK
 
@@ -202,9 +235,23 @@ def _print_baseline_diff(
         return USAGE_ERROR
 
     out.line(format_scorecard(comparison))
-    out.coverage_statement()
     if comparison.comparability.grade.value == "C":
         out.warn(f"comparability grade C: {comparison.comparability.reason}")
+    if out.json_mode:
+        out.emit_json(
+            {
+                "run_id": run_id,
+                "target": target_name,
+                "achieved_speedup": comparison.achieved_speedup,
+                "ideal_parallel_speedup": comparison.ideal_parallel_speedup,
+                "overhead_cost": comparison.overhead_cost,
+                "gap": comparison.gap,
+                "token_cost_multiplier": comparison.token_cost_multiplier,
+                "comparability_grade": comparison.comparability.grade.value,
+                "comparability_reason": comparison.comparability.reason,
+            }
+        )
+    out.coverage_statement()
     # No pass/fail check is part of `--baseline`'s own spec (unlike `--assert` or a
     # scenario's tolerance check) — a low speedup or grade C is information this command
     # reports honestly, not a failure of the command itself. Exit OK once the comparison was

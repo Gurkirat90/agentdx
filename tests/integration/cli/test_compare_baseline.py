@@ -78,6 +78,38 @@ def test_compare_two_runs_diffs_directly_with_no_baseline_generation(
     assert "verdict" in result.output
 
 
+def test_compare_two_runs_discloses_that_the_exit_code_never_reflects_a_regression(
+    cli_runner: CliRunner, isolated_data_dir: Path
+) -> None:
+    """OP-2 first-pass finding #3 against `cli/` (`op2-audit-p17.md`).
+
+    No regression/tolerance logic exists for the two-run form — PRD §37.1 documents exit 1
+    for "regression beyond tolerance", but that is unreachable here. Rather than leave this
+    silent, the command now warns on every invocation, matching `--tolerance-file`/`--force`'s
+    own disclosure above.
+    """
+    run_id = _run_code_pipeline(cli_runner)
+    result = cli_runner.invoke(app, ["compare", run_id, run_id])
+    assert result.exit_code == _exitcodes.OK, result.output
+    assert "informational only" in result.output
+    assert "exit code is always 0" in result.output
+
+
+def test_compare_two_runs_findings_count_includes_verdict_layer_findings(
+    cli_runner: CliRunner, isolated_data_dir: Path
+) -> None:
+    """The two-run form's `findings` row must not undercount to race findings alone.
+
+    `code_pipeline` (seed 42) has one `state_conflict` finding and one `redundancy`
+    finding — two real findings total, not one (OP-2 first-pass finding #2's own
+    informational-display instance, `op2-audit-p17.md` §2).
+    """
+    run_id = _run_code_pipeline(cli_runner)
+    result = cli_runner.invoke(app, ["compare", run_id, run_id])
+    assert result.exit_code == _exitcodes.OK, result.output
+    assert "findings      2" in result.output
+
+
 def test_compare_baseline_missing_run_is_not_found(
     cli_runner: CliRunner, isolated_data_dir: Path
 ) -> None:

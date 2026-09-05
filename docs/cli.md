@@ -128,6 +128,17 @@ test_doctor.py` deliberately breaks three setups and asserts `doctor` catches ea
 missing/wrong `PYTHONHASHSEED`, a store db claiming a schema version this build cannot read,
 and a port already bound by something else.
 
+**Coverage gap, stated plainly (OP-2 first-pass finding #4 against `cli/`,
+`op2-audit-p17.md`).** PRD §37 names roughly nine checks; the six above are implemented.
+**Not implemented**: data-dir writability, SQLite WAL-mode support, DuckDB availability, cache
+*integrity* (`cache-db` only checks the file exists, never that it opens cleanly), last-run
+determinism-quality/instrumentation-gap reporting, and — named twice in the PRD, once in the
+checklist and once as Design Constraint 4's own requirement — a scan for an API key present in
+`agentdx.toml` or a committed file. `doctor`'s exit code is also two-tier only (0/2) — PRD's
+documented three-tier contract ("0 all pass · 1 warnings · 2 failures") has no `Check` severity
+field to reach exit 1 from. The six checks above are real and correct as far as they go; this
+is a genuine gap against the PRD's fuller list, not a defect in what's implemented.
+
 ### `agentdx scenario validate|list|expand|run`
 
 `validate`/`list`/`expand` are thin wrappers over `cli._scenario_io`'s load →

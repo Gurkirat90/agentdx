@@ -177,6 +177,31 @@ async def _async_scenario_run(
     for assertion in outcomes[0].assertions if outcomes else ():
         mark = {"passed": "✓", "failed": "✗", "not_measurable": "·"}[assertion.status]
         out.line(f"  {mark} {assertion.assertion_id}: {assertion.detail}")
+
+    if out.json_mode:
+        # OP-2 first-pass finding #1 against `cli/` (`op2-audit-p17.md`): global `--json`
+        # previously emitted nothing to stdout on this command at all.
+        out.emit_json(
+            {
+                "scenario": scenario_name,
+                "repeat": repeat,
+                "reproducible": reproducible,
+                "distinct_outcomes": len(distinct),
+                "runs": [
+                    {
+                        "status": o.status,
+                        "run_id": o.run_id,
+                        "detail": o.detail,
+                        "assertions": [
+                            {"id": a.assertion_id, "status": a.status, "detail": a.detail}
+                            for a in o.assertions
+                        ],
+                    }
+                    for o in outcomes
+                ],
+            }
+        )
+
     out.coverage_statement()
 
     if not reproducible or any_run_error:

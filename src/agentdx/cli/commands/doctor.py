@@ -6,6 +6,22 @@ AGENTS.md §4's "no magic numbers"), the `PYTHONHASHSEED=0` requirement is AGENT
 project-wide rule, and the store's migration state is `store.migrations.current_version`/
 `latest_version` — the same functions `Store.open` itself consults. `doctor` composes checks;
 it does not define new pass/fail thresholds of its own.
+
+**Coverage gap, stated plainly (OP-2 first-pass finding #4 against `cli/`, `op2-audit-p17.md`
+— not silently carried as an implicit gap the way it was before this note was added).** PRD
+§37 names roughly nine checks; six are implemented here (`python-version`, `langgraph-version`,
+`hash-seed`, `cache-db`, `store-migration`, `port`). **Not implemented**: data-dir writability,
+SQLite WAL-mode support, DuckDB availability, cache *integrity* (`cache-db` only checks the
+file exists, not that it opens cleanly), last-run determinism-quality/instrumentation-gap
+reporting, and — the one PRD calls out twice, once by name in the checklist and once again as
+its own Design Constraint 4 requirement — scanning for an API key present in `agentdx.toml` or
+a committed file. `Check` also has no severity tier, so `doctor()`'s exit code can only ever be
+`OK` or `USAGE_ERROR` (2) — PRD's own three-tier contract ("0 all pass · 1 warnings ·
+2 failures") is collapsed to two; exit 1 is unreachable from this command today. Unlike this
+codebase's other unbuilt CLI surfaces (`replay`, `export`, `cache *`, etc., all of which
+self-declare via `_not_implemented(...)`), `doctor` had no equivalent disclosure until this
+note — the six implemented checks are real and correct as far as they go, this is a genuine
+coverage gap against the PRD's fuller list, not a defect in what exists.
 """
 
 from __future__ import annotations
