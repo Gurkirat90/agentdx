@@ -203,7 +203,14 @@ def test_get_exploration_always_409_in_this_build(
     assert response.status_code == 409
     body = response.json()
     assert body["error"]["code"] == "E-EXPL-001"
-    assert "coverage" in body["error"]["message"].lower() or "bounded" in body["error"]["message"]
+    # I10 (CONTEXT.md §2) requires this exact sentence verbatim — a loose substring check
+    # ("coverage" or "bounded") has no discriminating power against a rephrase that drops it
+    # while keeping either word (OP-2 audit, op2-audit-p14.md finding #3, demonstrated live: a
+    # mutated message with the real I10 sentence entirely removed still passed the old assert).
+    assert (
+        "Bounded search: absence of findings is not proof of absence."
+        in body["error"]["message"]
+    )
 
 
 def test_get_exploration_404_for_unknown_run(client: TestClient) -> None:

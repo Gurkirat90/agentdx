@@ -237,3 +237,126 @@ def test_heartbeat_timeout_closes_1000(api_config: AgentDXConfig, db_path: Path)
                 # Never send another message — the receiver's read times out.
                 ws.receive_json()
         assert excinfo.value.code == 1000
+
+
+def test_flow_control_pauses_and_resumes_on_ack(
+    api_config: AgentDXConfig, db_path: Path, sealed_run: tuple[str, tuple]
+) -> None:
+    """PRD §26.2 flow control: `ack` resumes a sender paused on too many unacked events.
+
+    OP-2 audit finding #5 (`op2-audit-p14.md`): `_await_flow_control`/`_handle_ack`/
+    `_maybe_update_sampling` had zero test coverage before this — no bug demonstrated, a pure
+    coverage gap the audit flagged honestly. `ws_backlog_batch_size=5` /
+    `ws_flow_control_max_unacked=4` (the same `dataclasses.replace(api_config,
+    api=api_config.api.with_overrides(...))` override pattern
+    `test_too_many_connections_closes_4013`/`test_heartbeat_timeout_closes_1000` already use)
+    make the second backlog batch (seqs 5-9) provably block: after the first batch sends
+    seqs 0-4, `last_sent_seq(4) - acked_through(-1) = 5 > 4`, so `_send_backlog` is genuinely
+    suspended in `ack_event.wait()` when the `ack` below is sent — not merely "would
+    eventually have arrived regardless" — and only that `ack` wakes it to send the second
+    batch. The test never has more than one unread frame in flight at a time (each batch is
+    received before the next `ack` is sent), so it makes no assumption about the WS test
+    transport's buffering.
+    """
+    run_id, _events = sealed_run
+    flow_config = dataclasses.replace(
+        api_config,
+        api=api_config.api.with_overrides(ws_backlog_batch_size=5, ws_flow_control_max_unacked=4),
+    )
+    app = create_app(config=flow_config, store_path=db_path)
+    with TestClient(app) as client, client.websocket_connect(f"/ws/runs/{run_id}") as ws:
+        ws.receive_json()  # hello
+        ws.send_json({"type": "subscribe", "from_seq": 0})
+
+        first_batch = ws.receive_json()
+        assert first_batch["type"] == "events"
+        assert [e["seq"] for e in first_batch["events"]] == list(range(5))
+
+        # At this point the sender has attempted to read the second batch and is blocked in
+        # `_await_flow_control` — nothing further can be on the wire until this ack unblocks
+        # it (proven by the assert right after: the second batch could not have been sent,
+        # let alone already read, before `through_seq=4` raises `acked_through` to 4).
+        ws.send_json({"type": "ack", "through_seq": 4})
+
+        second_batch = ws.receive_json()
+        assert second_batch["type"] == "events"
+        assert [e["seq"] for e in second_batch["events"]] == list(range(5, 10))
+
+        ws.send_json({"type": "unsubscribe"})
+
+
+def test_three_consecutive_pauses_escalate_to_sampled_mode(
+    api_config: AgentDXConfig, db_path: Path
+) -> None:
+    """PRD §26.2 "switches to sampled mode": three consecutive live-tailing pauses trigger it.
+
+    OP-2 audit finding #5, the other half of the same coverage gap
+    `test_flow_control_pauses_and_resumes_on_ack` closes — this one targets `_send_live`'s
+    `consecutive_pauses`/`_maybe_update_sampling` path specifically, since `ws.py`'s own
+    module docstring says a *backlog* pause never counts ("backlog sending already blocks on
+    flow control by design — a pause there is not evidence of trouble"); only a pause while
+    tailing *live* does. `ws_backlog_batch_size=1` makes `_read_batch` return at most one
+    event per read — both for the backlog drain and, per `_send_live`'s own docstring, as its
+    internal live read-chunk size too — so each of the three events below is discovered and
+    paused on in its own separate `_send_live` loop iteration, never grouped into one.
+
+    All three live events are written to the store in one call, before any of them is acked,
+    so no iteration can ever observe an empty read in between them — which would silently
+    reset `consecutive_pauses` back to 0 — purely because of scheduling luck. The sequence
+    below is deterministic, not timing-dependent: every wait blocks with no I/O in flight
+    (the flow-control check runs before `send_json`, never after), and every send is drained
+    by exactly one `receive_json` before the next `ack` goes out, so nothing is ever left
+    unread on the wire for the transport's buffering to matter.
+    """
+    events = build_log(spans=1, sealed=False)  # unsealed: status stays "running" throughout
+    run_id = events[0].run_id
+    chained = chain(events)
+
+    store = Store.open(db_path, config=api_config.store)
+    try:
+        record = RunRecord(**run_record_for(events))  # type: ignore[arg-type]
+        store.create_run(record)
+        store.append(chained[:1])  # just run_start — the entire initial backlog
+    finally:
+        store.close()
+
+    sampling_config = dataclasses.replace(
+        api_config,
+        api=api_config.api.with_overrides(
+            ws_backlog_batch_size=1, ws_flow_control_max_unacked=0, ws_poll_interval_s=0.05
+        ),
+    )
+    app = create_app(config=sampling_config, store_path=db_path)
+    with TestClient(app) as client, client.websocket_connect(f"/ws/runs/{run_id}") as ws:
+        ws.receive_json()  # hello
+        ws.send_json({"type": "subscribe", "from_seq": 0})
+
+        backlog = ws.receive_json()
+        assert backlog["type"] == "events"
+        assert [e["seq"] for e in backlog["events"]] == [0]
+
+        # `_send_live`'s first iteration cannot find any live event yet (none appended below
+        # this line yet) — it reports the run's status before ever attempting a flow-control
+        # wait, deterministically, not by timing luck.
+        running_status = ws.receive_json()
+        assert running_status == {"type": "status", "status": "running"}
+
+        store2 = Store.open(db_path, config=api_config.store)
+        try:
+            store2.append(chained[1:4])  # three more real events, all before any ack
+        finally:
+            store2.close()
+
+        for expected_seq, through_seq in ((1, 0), (2, 1), (3, 2)):
+            # Each event is discovered already paused (`max_unacked=0` and `acked_through`
+            # only ever advances to the previous event's own seq) — the ack below is what
+            # lets `_send_live` actually send it.
+            ws.send_json({"type": "ack", "through_seq": through_seq})
+            frame = ws.receive_json()
+            assert frame["type"] == "event"
+            assert frame["event"]["seq"] == expected_seq
+
+        sampling_status = ws.receive_json()
+        assert sampling_status == {"type": "status", "sampling": 2}
+
+        ws.send_json({"type": "unsubscribe"})

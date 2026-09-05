@@ -185,7 +185,8 @@ class ScenarioUnresolvableForChaosError(ApiError):
     one — and PRD §36 rule 1 ("never fail silently") plus I12 itself both require that
     ambiguity to refuse the fault, not silently skip authorization and arm it anyway. Raised
     only when `scenario_id` is set but unresolvable — a run with no `scenario_id` at all
-    (never populated) is unaffected by this error; see this error's call site for why.
+    (never populated) raises the sibling `ScenarioMissingForChaosError` instead; see this
+    error's call site for why.
     """
 
     status_code = status.HTTP_409_CONFLICT
@@ -198,6 +199,35 @@ class ScenarioUnresolvableForChaosError(ApiError):
             f"injection is refused because chaos-safety authorization (I12) cannot be "
             f"verified without it",
             detail={"run_id": run_id, "scenario_id": scenario_id},
+        )
+
+
+class ScenarioMissingForChaosError(ApiError):
+    """`409 E-CHAOS-005` — a run has no `scenario_id` at all; I12 cannot be verified.
+
+    OP-2 audit finding #1 (`op2-audit-p14.md`): `POST /api/runs` always sets `scenario_id`
+    (`RunCreateRequest.scenario_id` is required), so a `RunRecord` with `scenario_id is None`
+    can only exist in this store via `POST /api/import` accepting a hand-edited `run.json`
+    whose `scenario_id` field was deleted or nulled — `store/bundle.py`'s integrity check
+    hashes `events.jsonl` only, never `run.json`'s own fields, so this is not a hypothetical.
+    Before this fix, `inject_fault`'s entire I12 block was skipped whenever `scenario_id is
+    None`, arming any fault with zero authorization — the sibling of the `scenario_id`-set-
+    but-unresolvable fail-open bug `ScenarioUnresolvableForChaosError` already closes, through
+    a path that repair's own reasoning did not consider. Same refusal, same rationale (PRD §36
+    rule 1, "never fail silently"; I12 itself): a run this build cannot resolve to a scenario
+    is refused, never silently treated as fixture-safe by default.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+
+    def __init__(self, run_id: str) -> None:
+        """Build the error naming the run that has no scenario_id to authorize against."""
+        super().__init__(
+            "E-CHAOS-005",
+            f"Run {run_id} has no scenario_id at all — fault injection is refused because "
+            f"chaos-safety authorization (I12) cannot be verified without a scenario to "
+            f"resolve",
+            detail={"run_id": run_id},
         )
 
 

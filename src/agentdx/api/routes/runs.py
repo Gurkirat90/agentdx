@@ -18,18 +18,21 @@ the one most shaped by two gaps this build carries into P14 (CONTEXT.md §7):
    `get_waterfall` already pay that cost where the PRD's own example payload needs it; this
    route does not need the DAG for anything it reports).
 
-**A third, narrower gap, closed only in part (post-P14 repair):** `inject_fault`'s I12
-authorization check (`_check_chaos_authorization`) originally defaulted to treating an
-unresolvable scenario as fixture-safe — a fail-open bug, since a scenario that cannot be
-re-parsed could just as easily have been a user-graph target. This is now refused
+**A third, narrower gap — closed in two passes.** `inject_fault`'s I12 authorization check
+(`_check_chaos_authorization`) originally defaulted to treating an unresolvable scenario as
+fixture-safe — a fail-open bug, since a scenario that cannot be re-parsed could just as
+easily have been a user-graph target. A 2026-08-24 partial review refused this
 (`ScenarioUnresolvableForChaosError`, `409 E-CHAOS-004`) whenever `scenario_id` is set but
-the scenario row is missing or won't parse. **Deliberately not closed by this repair:** a
-run whose `RunRecord.scenario_id` is `None` outright (never populated) still skips the I12
-check entirely, same as before. `POST /api/runs` always sets `scenario_id`, so this is not
-reachable through the shipped API today — but it is a real, narrower version of the same
-gap, left open because closing it would mean deciding what a scenario-less run's fault
-authorization default *should* be (refuse always? require an explicit override?), which is
-a product decision, not a repair — see the repair's own audit trail for the reasoning.
+the scenario row is missing or won't parse — but reasoned that `scenario_id is None` outright
+was "not reachable through the shipped API today" (`POST /api/runs` always sets it) and left
+it open as a deferred product decision. **An OP-2 audit (`op2-audit-p14.md`) found that
+reasoning incomplete**: `POST /api/import` is a second, real, shipped run-creation path, and
+`store/bundle.py`'s integrity check never hash-verifies `run.json`'s own fields — a hand-
+edited bundle (`status: "running"`, `scenario_id` deleted) imports cleanly and reaches
+`inject_fault` with `scenario_id is None`, skipping I12 entirely and arming any fault with
+zero authorization. Now refused (`ScenarioMissingForChaosError`, `409 E-CHAOS-005`) the same
+way the sibling case is: a run this build cannot resolve to a scenario is never treated as
+fixture-safe by default, regardless of *why* it has no scenario to resolve.
 """
 
 from __future__ import annotations
@@ -53,6 +56,7 @@ from agentdx.api.errors import (
     RunLaunchUnavailableError,
     RunNotFoundError,
     RunNotRunningError,
+    ScenarioMissingForChaosError,
     ScenarioNotFoundError,
     ScenarioUnresolvableForChaosError,
     TooManyConcurrentRunsError,
@@ -499,8 +503,35 @@ def _check_param(name: str, value: object, constraint: ParamConstraint) -> str |
     return None  # no py_type this checker knows how to validate — declared, not silent
 
 
-def _check_chaos_authorization(resolved: dict[str, object], target: str) -> None:
+#: `TargetKind` -> the `blast_radius.<field>` list it is declared under (PRD §13.4's five
+#: categories). Mirrors `scenario/validate.py`'s own `_BLAST_RADIUS_FIELD` — duplicated here
+#: rather than importing that module's private symbol across the `api/` -> `scenario/`
+#: boundary, the same "small, stable, another-layer-owned mapping duplicated rather than
+#: imported" discipline `analysis/verdict.py`'s `Severity`/`analysis/baseline.py`'s
+#: `ComparabilityGrade` already use.
+_BLAST_RADIUS_FIELD: Final[dict[TargetKind, str]] = {
+    TargetKind.AGENT: "agents",
+    TargetKind.TOOL: "tools",
+    TargetKind.EDGE: "edges",
+    TargetKind.STATE_KEY: "state_keys",
+    TargetKind.PROVIDER: "providers",
+}
+
+
+def _check_chaos_authorization(
+    resolved: dict[str, object], target: str, target_kinds: tuple[TargetKind, ...]
+) -> None:
     """Enforce I12/§13.3 for a user-graph scenario; fixture targets are chaos-safe by default.
+
+    `target_kinds` (the armed fault's own `FaultSpec.target_kinds`) narrows which
+    `blast_radius` categories are even relevant to *this* fault (OP-2 audit, op2-audit-p14.md
+    finding #2) — a fault whose `target_kinds` is `(EDGE, AGENT)` (e.g. `latency`, "may target
+    either kind" per PRD §13.4) may only be authorized via `blast_radius.edges`/
+    `blast_radius.agents`; a string declared only under `blast_radius.tools` must never
+    authorize it. Before this fix, every category was flattened into one bag of strings and
+    checked only for "is this target string present somewhere," letting a `tools:` entry
+    silently authorize an unrelated agent- or edge-kind fault whose target string happened to
+    collide with it.
 
     Raises:
         ChaosAuthorizationError: `403 E-CHAOS-001`.
@@ -512,7 +543,8 @@ def _check_chaos_authorization(resolved: dict[str, object], target: str) -> None
     blast_radius = resolved.get("blast_radius")
     declared: list[str] = []
     if isinstance(blast_radius, dict):
-        for value in blast_radius.values():
+        for kind in target_kinds:
+            value = blast_radius.get(_BLAST_RADIUS_FIELD[kind])
             if isinstance(value, list):
                 declared.extend(str(v) for v in value)
     if not declared:
@@ -550,8 +582,11 @@ def inject_fault(
             (`scenario_id` non-null) but its row is missing from the store or its stored
             text no longer parses, so I12 authorization cannot be verified. Refused rather
             than treated as fixture-safe by default — see this module's top docstring ("A
-            third, narrower gap") for the fail-open bug this replaces and the one related
-            gap left open on purpose.
+            third, narrower gap") for the fail-open bug this replaces.
+        ScenarioMissingForChaosError: `409 E-CHAOS-005` — the run has no `scenario_id` at
+            all. Only reachable via `POST /api/import` of a bundle whose `run.json` was
+            hand-edited to omit it (`POST /api/runs` always sets it) — refused, not treated
+            as fixture-safe (op2-audit-p14.md finding #1).
         FaultControlUnavailableError: `503` — no `FaultController` configured.
     """
     record = store.get_run(run_id)
@@ -579,21 +614,24 @@ def inject_fault(
     if spec.target_kinds == (TargetKind.AGENT,) and body.target not in store.list_agent_ids(run_id):
         raise FaultTargetNotFoundError(body.target, run_id)
 
-    if record.scenario_id is not None:
-        # A scenario_id is set, so I12 authorization must actually be verified, not skipped
-        # — a missing row or an unparseable one is refused (E-CHAOS-004), never silently
-        # treated as "no scenario, nothing to check" (that was the fail-open bug this
-        # replaces; see the module's top docstring). `scenario_id is None` outright — never
-        # populated at all — is a separate, narrower, still-open gap; see the same note.
-        scenario = store.get_scenario(record.scenario_id)
-        if scenario is None:
-            raise ScenarioUnresolvableForChaosError(run_id, record.scenario_id)
-        try:
-            parsed = loader.parse_scenario_text(scenario.content, source_name=record.scenario_id)
-            resolved = loader.resolve_defaults(parsed.data or {})
-        except loader.ScenarioLoadError as exc:
-            raise ScenarioUnresolvableForChaosError(run_id, record.scenario_id) from exc
-        _check_chaos_authorization(resolved, body.target)
+    # I12 authorization must actually be verified for every run, never skipped — a missing
+    # scenario_id, a missing row, or an unparseable one are all refused, never silently
+    # treated as "nothing to check" (that was the fail-open bug this whole block replaces;
+    # see the module's top docstring and op2-audit-p14.md finding #1). `POST /api/runs`
+    # always sets `scenario_id` (`RunCreateRequest.scenario_id` is required), so the only way
+    # a stored run reaches this point with `scenario_id is None` is a `POST /api/import` of a
+    # bundle whose `run.json` was hand-edited to omit it — refused, not treated as fixture-safe.
+    if record.scenario_id is None:
+        raise ScenarioMissingForChaosError(run_id)
+    scenario = store.get_scenario(record.scenario_id)
+    if scenario is None:
+        raise ScenarioUnresolvableForChaosError(run_id, record.scenario_id)
+    try:
+        parsed = loader.parse_scenario_text(scenario.content, source_name=record.scenario_id)
+        resolved = loader.resolve_defaults(parsed.data or {})
+    except loader.ScenarioLoadError as exc:
+        raise ScenarioUnresolvableForChaosError(run_id, record.scenario_id) from exc
+    _check_chaos_authorization(resolved, body.target, spec.target_kinds)
 
     if state.fault_controller is None:
         raise FaultControlUnavailableError()

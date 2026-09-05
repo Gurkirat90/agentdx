@@ -156,9 +156,14 @@ forbidden_modules =
     agentdx.cli
 
 ; --- api/ ------------------------------------------------------------------------------
-; "May import: store, analysis. Must not import: runtime." The API server never imports the
-; runtime: it launches runs as a SUBPROCESS and tails the event table (PRD §24.2). Two
-; processes share the SQLite file in WAL mode — one writer, readers only here.
+; "May import: store, analysis, scenario. Must not import: runtime." The API server never
+; imports the runtime: it launches runs as a SUBPROCESS and tails the event table (PRD
+; §24.2). Two processes share the SQLite file in WAL mode — one writer, readers only here.
+; `scenario` is permitted — ratified 2026-09-05, ADR-023 (op2-audit-p14.md finding #4a):
+; routes/runs.py and routes/scenarios.py resolve scenario documents for real, load-bearing
+; reasons (POST /api/runs's scenario resolution, I12 chaos-authorization itself); this was
+; already true when this contract was written and simply never named. `forbidden_modules`
+; below is unchanged — `scenario` was never listed, so nothing here changes mechanically.
 [importlinter:contract:api-never-imports-runtime]
 name = api/ launches runs as a subprocess and never imports the runtime
 type = forbidden

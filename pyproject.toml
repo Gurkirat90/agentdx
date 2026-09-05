@@ -32,11 +32,11 @@ dependencies = [
   "uvicorn>=0.32,<1.0",
   "websockets>=13,<16",
   "pydantic>=2.9,<3.0",
-  # `python-multipart` — ADR-014. FastAPI's own multipart/form parser (Starlette calls into
+  # `python-multipart` — ADR-024. FastAPI's own multipart/form parser (Starlette calls into
   # it for `UploadFile`); required by `POST /api/import`, which PRD §26.1 specifies as a
-  # multipart upload. Not one of ADR-004's enumerated distributions — flagged for owner
-  # ratification in P14's closing blocks, following AGENTS.md §2's "ADR before any new
-  # dependency" rule.
+  # multipart upload. Not one of ADR-004's enumerated distributions — ratified by ADR-024
+  # (an OP-2 audit, op2-audit-p14.md finding #4b, found this comment previously cited
+  # "ADR-014," an unrelated real ADR entry, as its authority — corrected here).
   "python-multipart>=0.0.12,<1.0",
   # CLI — CONTEXT.md §3, PRD §37
   "typer>=0.15,<1.0",
