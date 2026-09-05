@@ -678,7 +678,10 @@ class Scheduler:
                 etc.) — written into ``schedule_decision.reason``.
 
         Raises:
-            SchedulerError: called from outside a scheduler-managed task (``E-SCHED-001``).
+            SchedulerError: called from outside a scheduler-managed task, or by a real
+                `asyncio.Task` other than the ambient identity's recorded legitimate owner
+                (``E-SCHED-001`` — see `_check_ambient_identity_ownership`, OP-2 second-pass
+                finding #1, op2-audit-p06-second.md).
         """
         task_id = _current_task_id()
         task = self._tasks.get(task_id)
@@ -688,6 +691,7 @@ class Scheduler:
                 f"known to this scheduler — was this coroutine spawned outside ``run()``?"
             )
             raise SchedulerError(detail)
+        self._check_ambient_identity_ownership(task_id, call=f"yield_point(reason={reason!r})")
         self._clear_backgrounded_checkin(task_id)
         self._fault_hook.pre_yield(task_id, reason)
         task.state = TaskState.RUNNABLE
@@ -711,6 +715,10 @@ class Scheduler:
 
         Raises:
             ValueError: ``ms`` is negative.
+            SchedulerError: called from outside a scheduler-managed task, or by a real
+                `asyncio.Task` other than the ambient identity's recorded legitimate owner
+                (``E-SCHED-001`` — see `_check_ambient_identity_ownership`, OP-2 second-pass
+                finding #1, op2-audit-p06-second.md).
         """
         if ms < 0:
             msg = f"virtual sleep duration must be non-negative, got {ms}ms"
@@ -720,6 +728,7 @@ class Scheduler:
         if task is None:
             detail = f"sleep({ms}ms) called from task {task_id!r} not known to this scheduler"
             raise SchedulerError(detail)
+        self._check_ambient_identity_ownership(task_id, call=f"sleep({ms}ms)")
         self._clear_backgrounded_checkin(task_id)
         wake_at = self._clock.now_ms() + ms
         task.state = TaskState.BLOCKED
@@ -942,6 +951,54 @@ class Scheduler:
         `Task.state`/`wait_reason` itself.
         """
         self._backgrounded.pop(task_id, None)
+
+    def _check_ambient_identity_ownership(self, task_id: str, *, call: str) -> None:
+        """Raise if the real task making `call` is not `task_id`'s recorded legitimate owner.
+
+        OP-2 second-pass finding #1 against `runtime/` (`op2-audit-p06-second.md`):
+        `begin_call` already makes exactly this comparison (`self._identity_owners.get(...)
+        is current_real_task`, above) before deciding whether `join`/`spawn` need a freshly
+        minted identity — but `yield_point`/`sleep` made no such check at all before this.
+        Any *second* real `asyncio.Task` that merely inherited a **copy** of `task_id`'s
+        ambient `SchedTaskContext` (ordinary `contextvars` copy-on-`Task`-creation semantics
+        — exactly what `asyncio.gather`/`ensure_future` produces for two concurrent LLM/tool
+        calls within one agent step, the pattern PRD §8.8 documents as supported) would
+        silently overwrite `self._task_futures[task_id]`, permanently orphaning whichever
+        call got there first — surfacing, up to 200 real ticks later, as a misleading
+        "genuinely stuck on real, unmanaged concurrency" `SchedulerError`/`DeadlockError`
+        rather than the actual scheduler bookkeeping collision it is.
+
+        `self._identity_owners[task_id]` already records, once, which real `asyncio.Task`
+        legitimately drives `task_id` — by `_drive_coro`, for every scheduler-spawned task
+        (including root), and by `begin_call`, for every identity it mints. Reused here
+        verbatim (not re-derived) so this check can never drift out of sync with the one
+        `begin_call` performs.
+
+        Args:
+            task_id: The ambient scheduler identity `call` is about to act under.
+            call: A human-readable description of the call, for the error detail only.
+
+        Raises:
+            SchedulerError: a real `asyncio.Task` other than `task_id`'s recorded owner is
+                making this call (``E-SCHED-001``).
+        """
+        current_real_task = asyncio.current_task()
+        owner = self._identity_owners.get(task_id)
+        if owner is not None and current_real_task is not None and owner is not current_real_task:
+            detail = (
+                f"{call} called under scheduler identity {task_id!r}, but a *different* "
+                f"real asyncio.Task is making this call than the one recorded as that "
+                f"identity's legitimate owner. This means two concurrent real tasks (e.g. "
+                f"two branches of one `asyncio.gather` making concurrent LLM/tool calls "
+                f"within one agent step, PRD §8.8) are sharing one ambient scheduler "
+                f"identity with no `begin_call`/`end_call` protection (OP-2 second-pass "
+                f"finding #1, op2-audit-p06-second.md) — not a real deadlock/livelock. "
+                f"Wrap concurrent scheduler calls that share an inherited ambient identity "
+                f"in `begin_call`/`end_call` (see "
+                f"`sdk.langgraph.LangGraphAdapter.run_node_async` for the established "
+                f"pattern) before making them."
+            )
+            raise SchedulerError(detail)
 
     def begin_call(self, *, agent_id: str) -> str:
         """Mint a private scheduler identity for one call into `spawn`/`join`, if needed.

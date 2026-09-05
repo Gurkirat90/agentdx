@@ -686,6 +686,66 @@ async def test_concurrent_begin_call_mints_distinct_non_colliding_identities() -
 
 
 @pytest.mark.asyncio
+async def test_concurrent_yield_point_under_one_shared_identity_raises_immediately() -> None:
+    """OP-2 second-pass finding #1 (`op2-audit-p06-second.md`), fixed.
+
+    Two ordinary concurrent "LLM calls" (`asyncio.gather` over two coroutines that each call
+    `scheduler.yield_point` directly, exactly how `sdk/providers/openai_compatible.py` does
+    it) with **no** `begin_call` wrapping — PRD §8.8's own documented "concurrent sub-tasks
+    within one agent" pattern. Before the fix, the second concurrent call silently clobbered
+    `self._task_futures[task_id]`, orphaning the first until a misleading `SchedulerError`
+    fired up to 200 ticks later ("genuinely stuck on real, unmanaged concurrency"). After the
+    fix, `yield_point` detects the ambient-identity mismatch and raises `SchedulerError`
+    immediately, on the very first colliding call — before any Future is even installed.
+    """
+    scheduler, _sink, _clock = build_scheduler(strict_determinism=False)
+    order: list[str] = []
+
+    async def _llm_call(name: str) -> str:
+        order.append(f"{name}-before")
+        await scheduler.yield_point(f"llm_call:{name}")
+        order.append(f"{name}-after")
+        return f"{name}-result"
+
+    async def root() -> object:
+        await _warm_up_with_a_sequential_call(scheduler)
+        # No begin_call wrapping here -- real LLM/tool call sites never call begin_call.
+        return await asyncio.gather(_llm_call("a"), _llm_call("b"))
+
+    with pytest.raises(SchedulerError, match=r"yield_point.*different.*real asyncio\.Task"):
+        await scheduler.run(root())
+    # Caught on the very first colliding call, not after the second one clobbers the first's
+    # Future -- "b-after" never appearing proves this, matching the audit's own demonstration.
+    assert order == ["a-before", "b-before"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sleep_under_one_shared_identity_raises_immediately() -> None:
+    """`sleep()`'s half of OP-2 second-pass finding #1 -- the identical collision.
+
+    Two concurrent virtual-time waits (e.g. two independent retry backoffs within one agent
+    step) sharing one ambient identity with no `begin_call` wrapping must raise immediately,
+    exactly like `yield_point` above, rather than silently overwriting each other's Future.
+    """
+    scheduler, _sink, _clock = build_scheduler(strict_determinism=False)
+    order: list[str] = []
+
+    async def _delayed(name: str, ms: int) -> str:
+        order.append(f"{name}-before")
+        await scheduler.sleep(ms)
+        order.append(f"{name}-after")
+        return f"{name}-result"
+
+    async def root() -> object:
+        await _warm_up_with_a_sequential_call(scheduler)
+        return await asyncio.gather(_delayed("x", 100), _delayed("y", 50))
+
+    with pytest.raises(SchedulerError, match=r"sleep.*different.*real asyncio\.Task"):
+        await scheduler.run(root())
+    assert order == ["x-before", "y-before"]
+
+
+@pytest.mark.asyncio
 async def test_end_call_on_the_noop_sentinel_is_a_safe_noop() -> None:
     """`end_call("")` — the no-op case's own close — must not raise or touch state."""
     scheduler, _sink, _clock = build_scheduler()

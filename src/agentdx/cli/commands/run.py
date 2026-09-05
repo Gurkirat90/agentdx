@@ -59,6 +59,7 @@ from agentdx.cli._target import (
 from agentdx.cli.host import (
     CliRunHost,
     RunAlreadyExistsError,
+    RunIdCollisionError,
     build_cache,
     build_cache_hook,
     build_fault_hooks,
@@ -873,6 +874,15 @@ async def _run_and_score(
             analysis=analysis,
             summary=summary,
             reused=True,
+        )
+    except RunIdCollisionError as exc:
+        # OP-2 second-pass finding #3 against `runtime/` (`op2-audit-p06-second.md`): a
+        # genuine 32-bit run_id hash collision between two DIFFERENT inputs — never the same
+        # code path as `RunAlreadyExistsError` above, and never reused. This is an internal
+        # error (I9: report NOT DONE rather than fabricate an answer), not a scenario
+        # pass/fail — the exit code must not be mistaken for either.
+        return _RunOutcome(
+            scenario_name, None, "failed", INTERNAL_ERROR, (), None, None, detail=str(exc)
         )
     except CacheMissError as exc:
         return _RunOutcome(

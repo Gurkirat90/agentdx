@@ -723,7 +723,27 @@ class LangGraphAdapter:
         not `run_node_async`'s caller. Without this rebind, every SDK call in the node body
         (`agent_scope`, `state_read`/`state_write`) would raise `RunContextError` the moment
         it tried to read the run that, from its own task's point of view, was never bound.
+
+        **`sdk_node_entry` warm-up — ADR-021's fix, generalized (OP-2 second-pass finding #2,
+        `op2-audit-p06-second.md`).** ADR-021 forces root through one guaranteed `yield_point`
+        (`sdk/generic.py:1879`, `"sdk_run_entry"`) before it ever reaches LangGraph's own
+        multi-tick Pregel/`ainvoke()` entry ceremony, because a task's *first* dispatch
+        (`_resume_task`'s `else` branch) survives only one real event-loop tick, while a
+        *resumption* (the `fut is not None` branch) tolerates up to `resume_drain_ticks`
+        (200) — root's own raw entry into that ceremony does not reliably fit in one tick on
+        real hardware. That reasoning applies identically to this method, one level down:
+        this coroutine is `spawn()`-ed by `run_node_async` and is therefore *this task's own*
+        first dispatch — if this node's body immediately fans out again (e.g. a subgraph
+        node, `START -> {a, b}`), it hits the exact same one-tick ceiling reproduced by the
+        audit as a real `DeadlockError` (`repro5_nested_immediate_fanout.py`) and by 9-plus
+        of a 180-run fuzz sweep's 55 failures. The fix reuses ADR-021's own established
+        pattern verbatim, at this new call site: one unconditional, always-taken
+        `yield_point`, before anything else in this task's body runs, so this task's *next*
+        suspension is a resumption rather than its raw first dispatch. I1 holds — the call
+        is unconditional, branches on nothing, and lands identically on every replay of the
+        same seed/scenario/graph.
         """
+        await run.scheduler.yield_point("sdk_node_entry")
         with use_run(run):
             async with agent_scope(
                 agent_id, name=node_name, clock_slot=self.clock_slot_for(node_name, agent_id)

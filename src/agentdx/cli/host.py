@@ -76,6 +76,7 @@ __all__ = [
     "CliRunHost",
     "OpenedRun",
     "RunAlreadyExistsError",
+    "RunIdCollisionError",
     "build_cache",
     "build_cache_hook",
     "build_fault_hooks",
@@ -107,6 +108,48 @@ class RunAlreadyExistsError(RuntimeError):
         """Carry the existing, sealed `RunRecord` so the caller needs no second store read."""
         self.record = record
         msg = f"run {record.run_id!r} already exists and is sealed; reusing it, not re-running"
+        super().__init__(msg)
+
+
+class RunIdCollisionError(RuntimeError):
+    """`open_run` found `run_id` already sealed, but for a genuinely *different* run.
+
+    OP-2 second-pass finding #3 against `runtime/` (`op2-audit-p06-second.md`):
+    `make_run_id`'s digest is only 32 bits (`runtime.scheduler.make_run_id`,
+    `digest_size=4`) — a real, demonstrated (not theoretical) collision rate; the audit found
+    two completely different `(seed, scenario_hash, graph_hash)` triples colliding in under
+    30,000 tries. Before this check existed, `open_run` could not tell a genuine D-80 rerun
+    (identical inputs, `RunAlreadyExistsError`, safe to reuse by I1) apart from an actual hash
+    collision between two *different* inputs — and silently treated both the same way,
+    reusing the wrong run's stored verdict/exit code for whatever was actually asked to run.
+    That is a real I9 ("no fabricated results") risk for exactly the CI-gate use case (FR-11b)
+    this project's own regression-comparison story depends on.
+
+    This is deliberately a **new, distinct** exception from `RunAlreadyExistsError` (a
+    legitimate rerun) rather than a flag on it — a repair/caller must not be able to
+    accidentally catch this the same way and reuse the mismatched record; `cli.commands.run`
+    classifies it as an internal error, not a passed/failed outcome, precisely because it
+    should not print anyone's verdict as if it were the answer to what was actually run.
+
+    Widening `digest_size` is a good complementary defense-in-depth change (lowers the odds)
+    but does not by itself close the silent-misattribution risk class this check closes —
+    both are worth doing; this one closes the class regardless of hash width.
+    """
+
+    def __init__(
+        self, record: RunRecord, *, scenario_hash: str, graph_hash: str, seed: int
+    ) -> None:
+        """Carry both the colliding stored record and this invocation's own resolved inputs."""
+        self.record = record
+        msg = (
+            f"run_id {record.run_id!r} collision: the sealed row was created for "
+            f"(seed={record.seed}, scenario_hash={record.scenario_hash!r}, "
+            f"graph_hash={record.graph_hash!r}) but this invocation resolved to "
+            f"(seed={seed}, scenario_hash={scenario_hash!r}, graph_hash={graph_hash!r}) — "
+            "a genuine run_id hash collision between two different inputs, extremely "
+            "unlikely but real (see runtime.scheduler.make_run_id); refusing to silently "
+            "reuse a different run's stored verdict"
+        )
         super().__init__(msg)
 
 
@@ -240,19 +283,38 @@ class CliRunHost:
 
         **`run_id` collision handling (D-80, C-34 — see `RunAlreadyExistsError`'s own
         docstring for the full ruling).** Checked before `create_run` rather than left to
-        surface as `E-STORE-010`, because the two collision causes need two different
-        responses that `create_run`'s own `IntegrityError` cannot distinguish: a **sealed**
-        collision raises `RunAlreadyExistsError` for `cli/` to reuse; an **unsealed** one —
-        an orphan from a prior attempt that never reached `close_run`/`seal` — is silently
-        replaced via `Store.discard_orphan_run` and this proceeds exactly as a fresh run.
+        surface as `E-STORE-010`, because the collision causes need different responses that
+        `create_run`'s own `IntegrityError` cannot distinguish: a **sealed** collision against
+        the *same* `(seed, scenario_hash, graph_hash)` raises `RunAlreadyExistsError` for
+        `cli/` to reuse (a legitimate D-80 rerun); a sealed collision against *different*
+        inputs raises `RunIdCollisionError` instead (OP-2 second-pass finding #3 against
+        `runtime/`, `op2-audit-p06-second.md` — a genuine, if rare, 32-bit hash collision,
+        never silently treated as a rerun); an **unsealed** collision — an orphan from a prior
+        attempt that never reached `close_run`/`seal` — is silently replaced via
+        `Store.discard_orphan_run` and this proceeds exactly as a fresh run (an orphan has no
+        verdict to misattribute, so the input-matching question does not apply to it).
 
         Raises:
-            RunAlreadyExistsError: `run_id` collides with an already-sealed run.
+            RunAlreadyExistsError: `run_id` collides with an already-sealed run for the
+                identical `(seed, scenario_hash, graph_hash)` — safe to reuse by I1.
+            RunIdCollisionError: `run_id` collides with an already-sealed run for *different*
+                inputs — a genuine hash collision, must never be reused.
         """
         resolved_seed = self._seed if seed is None else seed
         existing = self._store.get_run(self._run_id)
         if existing is not None:
             if existing.sealed:
+                if (
+                    existing.scenario_hash != self._scenario_hash
+                    or existing.graph_hash != self._graph_hash
+                    or existing.seed != resolved_seed
+                ):
+                    raise RunIdCollisionError(
+                        existing,
+                        scenario_hash=self._scenario_hash,
+                        graph_hash=self._graph_hash,
+                        seed=resolved_seed,
+                    )
                 raise RunAlreadyExistsError(existing)
             self._store.discard_orphan_run(self._run_id)
         started_at = _started_at_utc()

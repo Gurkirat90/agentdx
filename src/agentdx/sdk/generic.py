@@ -1876,6 +1876,12 @@ async def run(
     # `schedule_decision` at the very start of every run's log (I1: still fully deterministic
     # — it is unconditional, carries no branch on task/graph content, and every replay of the
     # same seed/scenario/graph takes it identically).
+    #
+    # Scope, corrected 2026-09-05 (OP-2 second-pass finding #2, `op2-audit-p06-second.md`):
+    # this call protects *root's* first dispatch only. A *spawned* node body's own first
+    # dispatch (e.g. a node that immediately fans out into a subgraph) hits the identical
+    # one-tick ceiling one level down — `sdk/langgraph.py::_run_node_body` now takes the same
+    # `yield_point` at its own top (`"sdk_node_entry"`), for the identical reason.
     await context.scheduler.yield_point("sdk_run_entry")
 
     payload = {"task": task} if graph_input is None else graph_input
