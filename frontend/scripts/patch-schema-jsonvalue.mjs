@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Post-processes the openapi-typescript output at src/api/schema.ts to break a self-referential
- * indexed-access type TypeScript cannot check (TS2502). See CONTEXT.md ruling C-016.
+ * indexed-access type TypeScript cannot check (TS2502). See CONTEXT.md ADR-016.
  *
  * openapi-typescript 7.13.0 emits the recursive "any JSON value" union (from the real
  * OpenAPI schema's `JsonValue-Input`/`JsonValue-Output`, whose `anyOf` legitimately contains
@@ -57,7 +57,7 @@ src = src
 
 const aliasBlock = `/**
  * Named aliases for the (self-referential) JsonValue-Input/Output schemas — patched in by
- * scripts/patch-schema-jsonvalue.mjs, see CONTEXT.md C-016. Same recursive union
+ * scripts/patch-schema-jsonvalue.mjs, see CONTEXT.md ADR-016. Same recursive union
  * openapi-typescript generated from the real OpenAPI schema, just addressable by name instead
  * of by bracketed index, which is the part TypeScript can check (TS2502 workaround).
  */

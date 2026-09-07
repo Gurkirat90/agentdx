@@ -60,6 +60,24 @@ export interface ScorecardTokens {
   cost_efficiency: number;
 }
 
+/**
+ * One row of `resilience.per_fault[]` (PRD §19.6's "full per-fault table", §19.7 rule 1: "the
+ * aggregate never appears without the per-fault breakdown"). Field names are drawn from
+ * `analysis/resilience.py`'s real `FaultScore` dataclass — the same ground-truth-not-invented
+ * approach this file's header describes for every other field, and the same gap it already
+ * discloses: no prompt has shipped a real persisted example of this JSON yet, so this is a
+ * documented ruling, not a guess against observed data. `score`/`degradation_class` are
+ * legitimately `null` for a fault whose own `status` is `not_fired`/`aborted` (§19.7 rules 2–3:
+ * excluded from the aggregate, listed rather than scored as 0).
+ */
+export interface ScorecardPerFault {
+  fault_id: string;
+  fault_label: string;
+  status: string;
+  score: number | null;
+  degradation_class: string | null;
+}
+
 export interface ScorecardPayload {
   run_id: string;
   speedup: ScorecardSpeedup;
@@ -68,6 +86,14 @@ export interface ScorecardPayload {
   comparability: ScorecardComparability;
   /** Present only when a chaos run scored resilience (§18.2: "25 if no chaos run"). */
   resilience_score: number | null;
+  /**
+   * §19.7 rule 1 is non-negotiable: the aggregate never appears without this table. Whenever
+   * `resilience_score` is non-null, this is guaranteed non-null too (enforced in
+   * `parseScorecardPayload` — a payload with a score but no matching `per_fault[]` fails to
+   * parse entirely, the same "never a silent partial render of mismatched data" doctrine this
+   * file's header already states, rather than showing a naked score with no evidence).
+   */
+  per_fault: ScorecardPerFault[] | null;
   /** Present only when the run's own wall-clock makespan was persisted alongside it. */
   wall_makespan_ms: number | null;
 }
@@ -162,6 +188,34 @@ export function parseScorecardPayload(raw: ScorecardResponse): ScorecardPayload 
   const runId = typeof raw.run_id === 'string' ? raw.run_id : '';
   const resilienceRaw = raw.resilience;
   const resilienceScore = isRecord(resilienceRaw) ? num(resilienceRaw.score) : null;
+
+  // §19.7 rule 1: a score never appears without its per-fault breakdown. If `score` is present,
+  // `per_fault[]` must parse cleanly too, or the whole payload is rejected (op2-audit-p15.md
+  // finding #4) — never render a bare number with no evidence table behind it.
+  let perFault: ScorecardPerFault[] | null = null;
+  if (resilienceScore !== null) {
+    const perFaultRaw = isRecord(resilienceRaw) ? resilienceRaw.per_fault : undefined;
+    if (!Array.isArray(perFaultRaw)) return null;
+    const parsedFaults: ScorecardPerFault[] = [];
+    for (const f of perFaultRaw) {
+      if (!isRecord(f)) return null;
+      const faultId = typeof f.fault_id === 'string' ? f.fault_id : null;
+      const status = typeof f.status === 'string' ? f.status : null;
+      if (faultId === null || status === null) return null;
+      const faultLabel = typeof f.fault_label === 'string' ? f.fault_label : faultId;
+      const score = num(f.score); // null is legitimate: not_fired/aborted faults are unscored
+      const degradationClass = typeof f.degradation_class === 'string' ? f.degradation_class : null;
+      parsedFaults.push({
+        fault_id: faultId,
+        fault_label: faultLabel,
+        status,
+        score,
+        degradation_class: degradationClass,
+      });
+    }
+    perFault = parsedFaults;
+  }
+
   const wallMakespan = num(raw.wall_makespan_ms);
 
   return {
@@ -192,6 +246,7 @@ export function parseScorecardPayload(raw: ScorecardResponse): ScorecardPayload 
       reason,
     },
     resilience_score: resilienceScore,
+    per_fault: perFault,
     wall_makespan_ms: wallMakespan,
   };
 }

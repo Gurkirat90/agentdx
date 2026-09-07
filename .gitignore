@@ -24,6 +24,10 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/.vite/
+# Vite/Vitest's own transient config-bundling artifacts -- written to frontend/ root when either
+# tool needs to bundle the ESM config file, normally auto-cleaned but can leak in some sandboxes.
+frontend/vite.config.ts.timestamp-*.mjs
+frontend/vitest.config.ts.timestamp-*.mjs
 # Playwright's own run artifacts (traces, screenshots) -- G8 output, never a source of truth.
 # NB: git does NOT support trailing comments on a pattern line -- the whole line, spaces and
 # all, is the pattern. Both entries below carried one from 2026-08-27 (commit bde03c9) until

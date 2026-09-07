@@ -539,7 +539,7 @@ export interface paths {
 export type webhooks = Record<string, never>;
 /**
  * Named aliases for the (self-referential) JsonValue-Input/Output schemas — patched in by
- * scripts/patch-schema-jsonvalue.mjs, see CONTEXT.md C-016. Same recursive union
+ * scripts/patch-schema-jsonvalue.mjs, see CONTEXT.md ADR-016. Same recursive union
  * openapi-typescript generated from the real OpenAPI schema, just addressable by name instead
  * of by bracketed index, which is the part TypeScript can check (TS2502 workaround).
  */

@@ -80,7 +80,14 @@ export const createRunSlice: StateCreator<RunSlice, [], [], RunSlice> = (set, ge
 
     void waterfallPromise.then((result) => {
       if (get().runId !== runId) return;
-      if (result.error) {
+      // `openapi-fetch` can return `{data: undefined, error: undefined}` on a non-JSON error
+      // body (this build's Vite dev-proxy 500 page when the backend is unreachable) — see
+      // CONTEXT.md D-60, which fixed this exact `!result.error`-only guard in
+      // graphSlice/findingsSlice/chaosSlice but missed this slice (op2-audit-p15.md finding
+      // #2). `result.data === undefined` must be treated as an error too, or `waterfall`
+      // becomes `undefined` (not `null`) and falls through Waterfall.tsx's `=== null` guard
+      // into a render-time TypeError on `undefined.lanes`.
+      if (result.error || result.data === undefined) {
         set({ waterfallStatus: 'error', waterfallError: describeError(result.error) });
       } else {
         set({ waterfall: result.data, waterfallStatus: 'loaded' });
@@ -89,12 +96,28 @@ export const createRunSlice: StateCreator<RunSlice, [], [], RunSlice> = (set, ge
 
     void scorecardPromise.then((result) => {
       if (get().runId !== runId) return;
-      if (result.error) {
+      if (result.error || result.data === undefined) {
         const status = result.response.status === 409 ? 'unavailable' : 'error';
         set({ scorecardStatus: status, scorecardError: describeError(result.error) });
         return;
       }
-      const parsed = parseScorecardPayload(result.data);
+      // `parseScorecardPayload` is defensive against a malformed *shape* (returns `null`,
+      // handled below) but not against a throw from an unexpected type entirely — wrapped so
+      // a parser defect can never become an unhandled promise rejection (op2-audit-p15.md
+      // finding #2: this `.then()` has no `.catch()`, and a throw here previously left
+      // `scorecardStatus` stuck at `'loading'` forever with no error surfaced to the user).
+      let parsed: ScorecardPayload | null;
+      try {
+        parsed = parseScorecardPayload(result.data);
+      } catch (err) {
+        set({
+          scorecardStatus: 'error',
+          scorecardError: `Scorecard payload could not be parsed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        });
+        return;
+      }
       if (parsed === null) {
         set({
           scorecardStatus: 'error',

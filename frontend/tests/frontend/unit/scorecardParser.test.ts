@@ -58,6 +58,98 @@ describe('parseScorecardPayload (PRD §17.4, C-013 ruling)', () => {
     const parsed = parseScorecardPayload(demoChainScorecard);
     expect(parsed).not.toBeNull();
     expect(parsed?.resilience_score).toBeNull();
+    expect(parsed?.per_fault).toBeNull();
     expect(parsed?.wall_makespan_ms).toBeNull();
+  });
+});
+
+describe('parseScorecardPayload — resilience.per_fault (op2-audit-p15.md finding #4, PRD §19.7 rule 1)', () => {
+  it('parses a real resilience.score + per_fault[] together', () => {
+    const withResilience = {
+      ...demoChainScorecard,
+      resilience: {
+        score: 82,
+        per_fault: [
+          {
+            fault_id: 'f_00',
+            fault_label: 'agent_crash(reviewer)',
+            status: 'scored',
+            score: 91.4,
+            degradation_class: 'graceful',
+          },
+          {
+            fault_id: 'f_01',
+            fault_label: 'latency(coder->reviewer)',
+            status: 'not_fired',
+            score: null,
+            degradation_class: null,
+          },
+        ],
+      },
+    } as unknown as ScorecardResponse;
+
+    const parsed = parseScorecardPayload(withResilience);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.resilience_score).toBe(82);
+    expect(parsed?.per_fault).toHaveLength(2);
+    expect(parsed?.per_fault?.[0]).toEqual({
+      fault_id: 'f_00',
+      fault_label: 'agent_crash(reviewer)',
+      status: 'scored',
+      score: 91.4,
+      degradation_class: 'graceful',
+    });
+    // §19.5/§19.7 rule 3: a not-fired fault is excluded from the aggregate and listed, not
+    // scored as 0 — `score`/`degradation_class` stay `null`, never coerced to a number.
+    expect(parsed?.per_fault?.[1]).toEqual({
+      fault_id: 'f_01',
+      fault_label: 'latency(coder->reviewer)',
+      status: 'not_fired',
+      score: null,
+      degradation_class: null,
+    });
+  });
+
+  it('rejects the whole payload when score is present but per_fault is missing — the exact §19.7 rule 1 violation this finding closes', () => {
+    const scoreWithoutTable = {
+      ...demoChainScorecard,
+      resilience: { score: 82 }, // no per_fault at all
+    } as unknown as ScorecardResponse;
+
+    expect(parseScorecardPayload(scoreWithoutTable)).toBeNull();
+  });
+
+  it('rejects the payload when per_fault is present but not an array', () => {
+    const malformed = {
+      ...demoChainScorecard,
+      resilience: { score: 82, per_fault: 'not-an-array' },
+    } as unknown as ScorecardResponse;
+
+    expect(parseScorecardPayload(malformed)).toBeNull();
+  });
+
+  it('rejects the payload when a per_fault entry is missing fault_id or status', () => {
+    const malformed = {
+      ...demoChainScorecard,
+      resilience: {
+        score: 82,
+        per_fault: [{ fault_label: 'agent_crash(reviewer)', score: 91.4 }], // no fault_id/status
+      },
+    } as unknown as ScorecardResponse;
+
+    expect(parseScorecardPayload(malformed)).toBeNull();
+  });
+
+  it('falls back fault_label to fault_id when the label is absent', () => {
+    const withResilience = {
+      ...demoChainScorecard,
+      resilience: {
+        score: 82,
+        per_fault: [{ fault_id: 'f_00', status: 'scored', score: 91.4, degradation_class: 'graceful' }],
+      },
+    } as unknown as ScorecardResponse;
+
+    const parsed = parseScorecardPayload(withResilience);
+    expect(parsed?.per_fault?.[0]?.fault_label).toBe('f_00');
   });
 });

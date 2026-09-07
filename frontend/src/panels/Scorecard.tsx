@@ -145,6 +145,38 @@ export function ScorecardPanel(): React.JSX.Element {
           {Math.round(comparability.cache_reuse_llm_rate * 100)}% — {comparability.reason}
         </p>
       </div>
+
+      {/* PRD §19.7 rule 1 ("the aggregate never appears without the per-fault breakdown ...
+       * enforced ... in the UI: the score component will not render without its table") —
+       * `parseScorecardPayload` already guarantees `per_fault` is non-null whenever
+       * `resilience_score` is, so this guard is defense-in-depth, not the only enforcement
+       * (op2-audit-p15.md finding #4: previously parsed but never rendered at all). */}
+      {scorecard.resilience_score !== null && scorecard.per_fault !== null ? (
+        <div className={styles.resilience}>
+          <div className={styles.resilienceHeader}>
+            <span>Resilience</span>
+            <span
+              className={`numeric ${styles.resilienceScore} ${
+                scorecard.resilience_score < 60 ? styles.resilienceLow : styles.resilienceOk
+              }`}
+            >
+              {scorecard.resilience_score} / 100
+            </span>
+          </div>
+          <ul className={styles.faults}>
+            {scorecard.per_fault.map((f) => (
+              <li key={f.fault_id} className={styles.faultRow}>
+                <span className={styles.faultLabel}>{f.fault_label}</span>
+                <span className={styles.faultStatus}>{f.status.replace(/_/g, ' ')}</span>
+                <span className="numeric">{f.score === null ? 'n/a' : f.score.toFixed(0)}</span>
+                <span className={styles.faultStatus}>
+                  {f.degradation_class === null ? '' : f.degradation_class.replace(/_/g, ' ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }
