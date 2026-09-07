@@ -206,21 +206,31 @@ Full detail: [`storage.md`](storage.md), PRD §27.
 
 An architecture document that describes the intended shape and stays silent about the parts that
 do not connect yet is a document that will mislead its first reader. `CONTEXT.md` §5, §6 and §7
-are authoritative and current; the two structural gaps worth knowing before you read any of the
-above as a working description:
+are authoritative and current. Both structural gaps this section used to describe here are now
+closed; they are kept below, marked, rather than deleted, because the history — what was broken,
+and what closing it actually took — is exactly what a reader forming an assumption would want to
+check rather than take on faith:
 
-- **No fixture graph completes a run.** Nothing in `sdk/` calls
-  `runtime.scheduler.Scheduler.spawn()`, so LangGraph's parallel fan-out has no way to become a
-  scheduler task and the cooperative loop deadlocks. The control-flow diagram in §6 is the design;
-  it does not execute end to end today. This is deviation **D-62** and it is the highest-severity
-  open item in the ledger — several acceptance gates fail behind it, and no packaging or
-  documentation work moves them.
-- **The Control Tower is not served by the API.** `api/app.py` mounts the REST and WebSocket
-  routers and nothing else; there is no static-file mount, so PRD §39.4's "frontend shipped inside
-  the wheel" is not implemented. The frontend is reachable through the Vite dev server.
+- ~~**No fixture graph completes a run.**~~ **Closed 2026-09-03 (ADR-019, D-62).** Nothing in
+  `sdk/` called `runtime.scheduler.Scheduler.spawn()`, so LangGraph's parallel fan-out had no way
+  to become a scheduler task and the cooperative loop deadlocked — the control-flow diagram in §6
+  was the design, not something that executed. `Scheduler.begin_call`'s dispatch gap was fixed
+  (candidate β) and independently OP-2 reviewed; re-confirmed again this session against a fresh,
+  empty data directory for all three reference fixtures (`code_pipeline`, `support_triage`,
+  `research_fanout`), genuine cold runs, all exit 0. Eight of the ten PRD §44.1 acceptance gates
+  now pass because of this; see `CHANGELOG.md`'s "Release readiness" section for which two do not
+  and why.
+- ~~**The Control Tower is not served by the API.**~~ **Closed 2026-09-07.** `api/app.py` now
+  mounts a static-file route behind the REST and WebSocket routers, with SPA fallback to
+  `index.html` for the frontend's real History-API router (`frontend/src/routes/router.tsx`) —
+  PRD §39.4's "frontend shipped inside the wheel" and §39.5's serving model are both implemented.
+  What is still true: this has been verified by test suite and code review, not by running the
+  built Docker image, since no Docker daemon is available anywhere this project has been worked
+  on. The Vite dev server remains how the frontend is reached during development.
 
-Neither is a defect in the architecture above. Both are places the architecture is not yet
-wired, which is a different and more fixable thing — but only if it is written down.
+Both gaps took real, dated, independently-verifiable work to close, not a documentation change —
+the corrections above cite what actually closed each one, on the same evidence standard the rest
+of this project holds itself to.
 
 ---
 

@@ -1,0 +1,206 @@
+name: Release
+
+# PRD §39.6's five-step release process, tag-triggered. Steps 1 and 3 are process, not
+# automation this file can enforce: 1 ("conventional commits -> version bump") is satisfied
+# by `pyproject.toml`'s version being the single source of truth (CHANGELOG.md's own "Version
+# policy" section) and a maintainer bumping it by hand before tagging -- this workflow's own
+# `verify` job below checks the pushed tag agrees with that version rather than silently
+# trusting it. 3 ("bench/results/ regenerated and committed if any published number changed")
+# is a commit-time discipline `scripts/check_bench_markers.py` enforces (Rule E1) on every PR,
+# not something a release workflow re-derives after the fact.
+#
+# Steps 2, 4 and 5 are what this file actually does:
+#
+#   2. `verify` re-runs this project's own quality gates (the same `just` recipes `ci.yml`
+#      runs, so a release and a PR are held to the literal same standard, not a looser one)
+#      plus the acceptance-gate subset `ci.yml` treats as blocking (G1, G2, G3, G4, G5, G6,
+#      G7, G9 -- see that workflow's own comment for why G8/G10 are excluded: G8 has no
+#      independent audit yet, G10 needs an arm64 Docker daemon this runner is not). A tag
+#      pushed before those pass should fail here, not publish anyway.
+#   4. `build-python`/`build-image`/`publish-pypi`/`publish-image` build the wheel+sdist and
+#      the Docker image and publish both, gated on `verify` passing.
+#   5. `CHANGELOG.md`'s Breaking-section discipline is a commit-time human process (see that
+#      file's own "Version policy" section) -- nothing here re-checks it, the same way step 1
+#      is process rather than automation.
+#
+# **Not yet triggered or run for real.** This file was written and its YAML validated, but no
+# tag has been pushed against it and this project's own sandbox has no way to trigger GitHub
+# Actions -- unlike this repo's other real, run, and dated verification claims, treat this one
+# as "should work, unexercised" until the first real tag proves it. PyPI publishing additionally
+# needs the PyPI project configured for Trusted Publishing (OIDC) against this repo/workflow
+# before `publish-pypi` can succeed -- a one-time PyPI-side setup step, not something a workflow
+# file can do for itself.
+#
+# "attaches the fixture bundles to the release" (PRD §39.6 step 4) is not defined more
+# precisely anywhere in the PRD. Read here as: a tarball of `fixtures/` (the three reference
+# systems plus their committed cache databases, PRD §39.4) -- the artifact someone would
+# actually want if they came for the fixtures without installing the package. A different
+# reading is reasonable; this one is stated plainly rather than guessed at silently.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (must already exist, e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write # create the GitHub release, upload assets
+  packages: write # push the image to GHCR
+  id-token: write # PyPI Trusted Publishing (OIDC) -- no stored PyPI token needed
+
+env:
+  PYTHONHASHSEED: "0"
+
+jobs:
+  verify:
+    name: verify (tag matches version, full gate set)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the tag being released
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: extractions/setup-just@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: just sync
+      - run: just sync-frontend
+
+      # The tag is the release's only stated version, and pyproject.toml is CHANGELOG.md's
+      # own declared single source of truth for what that version *is* -- if they disagree,
+      # tagging happened before (or instead of) the version bump, and publishing under a tag
+      # that names the wrong version is a worse failure than refusing to publish at all.
+      - name: Tag matches pyproject.toml's version
+        id: version
+        run: |
+          PKG_VERSION="$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          TAG="${{ steps.tag.outputs.tag }}"
+          TAG_VERSION="${TAG#v}"
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::tag $TAG (version $TAG_VERSION) does not match pyproject.toml's version $PKG_VERSION"
+            exit 1
+          fi
+
+      # Same standard as ci.yml's own python/ledger/frontend jobs -- a release is not held to
+      # a looser bar than an ordinary PR.
+      - run: just lint
+      - run: just typecheck
+      - run: just test
+      - run: just check-fixture-evidence
+      - run: just check-imports
+      - run: just check-determinism
+      - run: just check-ledger
+      - run: just check-bench
+      - name: Frontend typecheck + lint
+        working-directory: frontend
+        run: |
+          npm run typecheck
+          npm run lint
+
+      # The blocking acceptance-gate subset (see ci.yml's own comment for the full reasoning
+      # behind this exact split). A release built from a commit where one of these regressed
+      # should fail here, loudly, rather than publish.
+      - name: Blocking acceptance gates (G1, G2, G3, G4, G5, G6, G7, G9)
+        run: just acceptance "g1_ or g2_ or g3_ or g4_ or g5_ or g6_ or g7_ or g9_"
+
+  build-python:
+    name: build wheel + sdist
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+
+  build-image:
+    name: build + push image (GHCR)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: [verify, build-python]
+    runs-on: ubuntu-latest
+    environment: pypi # repo Environment gate, if configured -- allows a manual approval step
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      # Trusted Publishing (OIDC): no API token stored in this repo. Requires the PyPI
+      # project to name this repo + this workflow file as a trusted publisher first -- a
+      # one-time setup step on PyPI's side (see this file's own header comment).
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  github-release:
+    name: create GitHub release
+    needs: [verify, build-python, build-image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      # "attaches the fixture bundles to the release" (PRD §39.6 step 4) -- see this file's
+      # own header comment for what that phrase is taken to mean here.
+      - name: Package the fixture bundles
+        run: tar -czf fixtures.tar.gz fixtures/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.verify.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/*
+            fixtures.tar.gz

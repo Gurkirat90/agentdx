@@ -8,9 +8,10 @@ A test in this package that passed for any other reason (parsing stdout for a ho
 substring, calling an internal function instead of the CLI, catching and downgrading a
 non-zero exit) would be exactly the kind of test §7 of the owning prompt exists to distrust.
 
-**Status as of 2026-09-04 (updated from the 2026-08-27 P18/19 QA-acceptance session that
-originally wrote this package — see CONTEXT.md §6 for the current row-by-row ledger, the
-single source of truth this note summarises rather than duplicates).**
+**Status as of 2026-09-07 (updated from the 2026-09-04 pass, itself updated from the
+2026-08-27 P18/19 QA-acceptance session that originally wrote this package — see CONTEXT.md
+§6 for the current row-by-row ledger, the single source of truth this note summarises rather
+than duplicates).**
 
 - G1, G4, G6, G7 — **green.** All four were blocked on the same root cause: PRD §44.1's own
   literal verification commands name CLI surfaces (`run --assert`, `scenario run --repeat`,
@@ -26,9 +27,13 @@ single source of truth this note summarises rather than duplicates).**
   `just`, repo owner's machine) after D-62 task #25's dispatch gap (candidate beta) and
   D-80/ADR-020 (the `run_id` reuse-and-print ruling for a sealed-row collision) both landed.
   `just demo-offline` exits 0 end-to-end for the first time in this project's history.
-- G10 — still red: `bench/harness/docker_cold_start.py`, the script `just bench-docker-cold`
-  calls, does not exist yet. No Docker build has been attempted (out of scope: no new
-  features, and this sandbox has no Docker daemon to build against either).
+- G10 — still red, but the reason changed 2026-09-07. `bench/harness/docker_cold_start.py`
+  is real and has run once (warm, Darwin/arm64, 2026-08-29). The D-62 dispatch deadlock that
+  used to make the `seed` service fail unconditionally is now closed (ADR-019, 2026-09-03) —
+  re-confirmed directly in this project's own sandbox against a fresh data directory, all
+  three fixtures, exit 0. What remains genuinely unmeasured: no cold-cache timing exists
+  (only `--no-prune`), and no environment available to this project combines a real Docker
+  daemon with the fix having landed, so a real `docker compose up` has not been re-run since.
 
 G2, G3, G5, G8 have real, already-built verification paths and are expected to pass in a
 real CI environment with Python 3.12 and Node installed. This sandbox itself has neither

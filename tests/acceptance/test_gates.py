@@ -368,20 +368,20 @@ def test_g8_control_tower_renders_and_cross_highlights() -> None:
 def test_g9_offline_demo() -> None:
     """PRD §44.1 G9: the full three-fixture demo works offline, no API keys present.
 
-    Never waived (PRD §44.3 maps this to I7). Re-run for real 2026-09-03 (Python 3.12, real
-    `just`, repo owner's machine) now that D-62 task #25's dispatch gap is closed (candidate
-    beta, `d62-design.md` SS8.7): `agentdx run fixtures/code_pipeline` is reached for real for
-    the first time and fails at `exit 5, StoreError [E-STORE-010] run 'r_50f3b68c' already
-    exists` -- **D-78/D-80**, not a new defect. `run_id` is a pure content hash of
-    `(seed, scenario_hash, graph_hash)` and the store is append-only (I2), so re-running the
-    identical fixture at the identical seed on the same machine collides with a row it
-    already wrote. The owner ruled the resolution 2026-09-01 (D-80, **C-34**: reuse-and-print
-    against a sealed row, replace against an unsealed one) but it was never implemented --
-    D-80's own row already said so ("implementation owed... blocks G9 independently of
-    D-62"). Every earlier attempt to reach this path hit either D-62's deadlock or D-77's
-    since-fixed exit-7 fixture-resolution gap first, so the previous docstring here (citing
-    exit 7) had gone stale without anyone observing it -- corrected now that a real run
-    exists to check it against, same standing practice as every other gate in this file.
+    **Green as of 2026-09-03**, on real Python 3.12 hardware, after both halves of the
+    D-62/D-78/D-80 chain closed: ADR-019 (2026-09-03, D-62 task #25's dispatch gap, candidate
+    beta, `d62-design.md` §8.7) means `agentdx run fixtures/code_pipeline` completes rather
+    than deadlocking; ADR-020 (D-80/**C-34**'s reuse-and-print ruling, implemented the same
+    day) means a repeated run at an identical seed reuses and prints the sealed row instead
+    of colliding with `E-STORE-010`. `just demo-offline` exits 0 end-to-end for the first
+    time in this project's history — never waived (PRD §44.3 maps this to I7), and this is
+    the gate that chain ultimately existed to unblock.
+
+    History, kept for context: an earlier run hit `exit 5, StoreError [E-STORE-010] run
+    'r_50f3b68c' already exists` once the deadlock alone was fixed — D-78/D-80, not a new
+    defect, and itself the successor to an even earlier exit-7 fixture-resolution bug
+    (D-77, separately fixed). Both are closed now; this docstring is corrected to say so
+    rather than leave the chain's now-resolved intermediate failures looking current.
     """
     _run_gate("G9", ["just", "demo-offline"], timeout_s=180)
 
@@ -390,9 +390,15 @@ def test_g9_offline_demo() -> None:
 def test_g10_docker_demo_under_180s_cold() -> None:
     """PRD §44.1 G10: `docker compose up` reaches healthy `/api/health` in <180s, cold, arm64.
 
-    Known-red as of 2026-08-27: `bench/harness/docker_cold_start.py`, the script `just
-    bench-docker-cold` calls, does not exist. No Docker build has been attempted by this
-    prompt — implementing it would be a new feature, out of this prompt's scope; the gap
-    is reported, per the prompt's own OUT OF SCOPE instruction, not silently filled.
+    Still red as of 2026-09-07, for a different reason than before. `bench/harness/
+    docker_cold_start.py` is real and has run once (warm, Darwin/arm64, 2026-08-29). The
+    D-62 dispatch deadlock that used to make the `seed` service fail unconditionally is now
+    closed (ADR-019, 2026-09-03) — re-confirmed directly against a fresh data directory for
+    all three fixtures, exit 0 each. What remains genuinely unmeasured: no cold-cache timing
+    exists yet, and no environment this project has had access to combines a real Docker
+    daemon with the fix having landed. `found_binary` in `.results/G10.json` will be `False`
+    if `just`/`docker` themselves are missing — the environment gap this docstring describes
+    is a step further than that: the tools exist, the fix landed, but nobody with a Docker
+    daemon has run this since.
     """
     _run_gate("G10", ["just", "bench-docker-cold"], timeout_s=200)

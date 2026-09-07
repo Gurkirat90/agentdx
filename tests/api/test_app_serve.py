@@ -115,3 +115,114 @@ def test_created_app_actually_serves(api_config: AgentDXConfig, db_path: Path) -
     with TestClient(app) as client:
         response = client.get("/api/health")
         assert response.status_code == 200
+
+
+def test_no_static_dir_means_root_404s_the_ordinary_way(
+    api_config: AgentDXConfig, db_path: Path
+) -> None:
+    """No `static/` (every environment but a Docker image built by this project) — `/` 404s.
+
+    `_STATIC_DIR` is a real, fixed path (`api/static/`) that does not exist in a source
+    checkout or this test suite's own environment, so this is the actual, unpatched default —
+    proof `create_app` does not invent a frontend that was never built.
+    """
+    app = create_app(config=api_config, store_path=db_path)
+    with TestClient(app) as client:
+        assert client.get("/").status_code == 404
+
+
+def test_static_dir_present_serves_index_at_root(
+    api_config: AgentDXConfig, db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a built frontend present, `/` serves its `index.html`, byte for byte."""
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><title>Control Tower</title>")
+    monkeypatch.setattr("agentdx.api.app._STATIC_DIR", static_dir)
+
+    app = create_app(config=api_config, store_path=db_path)
+    with TestClient(app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert "Control Tower" in response.text
+
+
+def test_static_dir_present_serves_a_real_asset_file(
+    api_config: AgentDXConfig, db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real file under `static/` (Vite's hashed bundle output) is served as itself."""
+    static_dir = tmp_path / "static"
+    (static_dir / "assets").mkdir(parents=True)
+    (static_dir / "index.html").write_text("<!doctype html><title>Control Tower</title>")
+    (static_dir / "assets" / "index-deadbeef.js").write_text("console.log('agentdx');")
+    monkeypatch.setattr("agentdx.api.app._STATIC_DIR", static_dir)
+
+    app = create_app(config=api_config, store_path=db_path)
+    with TestClient(app) as client:
+        response = client.get("/assets/index-deadbeef.js")
+    assert response.status_code == 200
+    assert "console.log" in response.text
+
+
+def test_spa_fallback_serves_index_for_a_client_side_route(
+    api_config: AgentDXConfig, db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deep link / hard refresh on a client-side route falls back to `index.html`.
+
+    `frontend/src/routes/router.tsx` is a real History-API router (`/runs/{id}`), not a hash
+    router — without this fallback, refreshing anywhere but `/` 404s. No file exists at
+    `/runs/r_abc123` on disk; the SPA shell is what must load so the client router can render it.
+    """
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><title>Control Tower</title>")
+    monkeypatch.setattr("agentdx.api.app._STATIC_DIR", static_dir)
+
+    app = create_app(config=api_config, store_path=db_path)
+    with TestClient(app) as client:
+        response = client.get("/runs/r_abc123/scorecard")
+    assert response.status_code == 200
+    assert "Control Tower" in response.text
+
+
+def test_static_catch_all_never_shadows_api_or_ws_routes(
+    api_config: AgentDXConfig, db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The frontend catch-all is registered last — `/api/health` still resolves, not the SPA shell.
+
+    Regression guard for the ordering `_mount_frontend`'s own docstring depends on: if a future
+    edit moved `_mount_frontend`'s call before `app.include_router(api_router)`, this is the
+    test that would catch it — `/api/health` would start returning `index.html` instead of the
+    real health payload.
+    """
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><title>Control Tower</title>")
+    monkeypatch.setattr("agentdx.api.app._STATIC_DIR", static_dir)
+
+    app = create_app(config=api_config, store_path=db_path)
+    with TestClient(app) as client:
+        response = client.get("/api/health")
+    assert response.status_code == 200
+    assert "Control Tower" not in response.text
+
+
+def test_static_catch_all_rejects_path_traversal(
+    api_config: AgentDXConfig, db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crafted path cannot escape `static_dir` to read an arbitrary file off the image.
+
+    Writes a real secret file just outside `static_dir` and confirms a traversal attempt
+    returns the SPA shell (the safe fallback), never the secret's contents.
+    """
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><title>Control Tower</title>")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do-not-serve-me")
+    monkeypatch.setattr("agentdx.api.app._STATIC_DIR", static_dir)
+
+    app = create_app(config=api_config, store_path=db_path)
+    with TestClient(app) as client:
+        response = client.get("/../secret.txt")
+    assert "do-not-serve-me" not in response.text

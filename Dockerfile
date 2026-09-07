@@ -19,40 +19,44 @@
 # result file), so it is a WARM measurement and is not a G10-conformant number. No cold build
 # has been timed. The image size against PRD §39.4's sub-500MB target has never been measured.
 #
-# Three known gaps the image cannot paper over, all confirmed by that run:
+# Two of the three gaps below are now CLOSED (2026-09-07 update). One remains.
 #
-#   1. `agentdx run <fixture>` cannot complete a run. Nothing in `sdk/` ever calls
-#      `runtime.scheduler.Scheduler.spawn()` (D-62; confirmed by `grep -rn '\.spawn('
-#      src/agentdx/`, zero hits against a `spawn` defined at `runtime/scheduler.py:752`).
-#      The compose command below exits 5, not 0, and the run list is EMPTY. Gate G10 asks
-#      for a *populated* run list; this image cannot produce one, and no amount of packaging
-#      work changes that.
-#      CORRECTION (2026-09-02, D-81): an earlier revision of this header said "LangGraph's
-#      parallel fan-out therefore deadlocks the single-task scheduler loop" as fact. That is
-#      now measured, not hypothesised, and it is WRONG. `tests/integration/runtime/test_d62_suspension_contract.py`
-#      (P20, commit 5a17eb5): a single-node, strictly sequential LangGraph graph with no
-#      fan-out at all deadlocks identically, while two controls (a root that never suspends;
-#      a root awaiting an already-resolved Future) both complete. Fan-out is incidental. The
-#      boundary actually observed: the scheduler tolerates `await`, but not an `await` whose
-#      resolution requires the event loop to run another task -- see `d62-design.md` §§2-3a
-#      for the corrected mechanism and D-81 for the ledger record. An earlier "one event-loop
-#      tick" claim in this same correction was itself retracted (the control that claimed to
-#      measure it was broken) -- see d62-design.md §3's own retraction note.
+#   1. CLOSED 2026-09-03 (ADR-019, closing D-62 task #25). `Scheduler.begin_call`'s candidate-β
+#      fix means a fanned-out node body no longer deadlocks the single-task scheduler loop.
+#      `agentdx run <fixture>` completes for real: ADR-019 validated all three reference
+#      fixtures end-to-end on real Python 3.12 hardware, and this update re-confirmed it in
+#      this sandbox (Python 3.10.12 + this session's disclosed stdlib-compat shim) against a
+#      genuinely fresh, empty data directory — `code_pipeline`, `support_triage` and
+#      `research_fanout` each exit 0 with a real verdict, no `(reused...)` line, a real
+#      `agentdx.db`/`cache.db` written. The compose `seed` service below should now complete
+#      and produce a populated run list, matching what G10 asks for — **not independently
+#      re-confirmed inside an actual container**, since this sandbox has no Docker daemon; the
+#      code path validated here is identical to what `seed`'s `sh -c` block runs, but a real
+#      `docker compose up` on a machine with Docker is still the authoritative G10 check.
+#      CORRECTION (2026-09-02, D-81) is still accurate and kept below: an earlier revision of
+#      this header said "LangGraph's parallel fan-out therefore deadlocks the single-task
+#      scheduler loop" as fact. That was measured and found WRONG.
+#      `tests/integration/runtime/test_d62_suspension_contract.py` (P20, commit 5a17eb5): a
+#      single-node, strictly sequential LangGraph graph with no fan-out at all deadlocks
+#      identically, while two controls (a root that never suspends; a root awaiting an
+#      already-resolved Future) both complete. Fan-out is incidental. The boundary actually
+#      observed: the scheduler tolerates `await`, but not an `await` whose resolution requires
+#      the event loop to run another task -- see `d62-design.md` §§2-3a for the corrected
+#      mechanism and D-81 for the ledger record.
 #
-#   2. `agentdx ui` serves the API only. `api/app.py` mounts `api_router` and `ws.router`
-#      and nothing else — there is no `StaticFiles` mount and no `src/agentdx/api/static/`
-#      directory, so PRD §39.4's "static assets copied into src/agentdx/api/static/ and
-#      shipped inside the wheel" is not implemented. Stage 1 still builds the frontend and
-#      stage 2 still places it where §39.4 says it belongs, so the asset is baked and ready
-#      the moment that mount lands — but until it does, `/` returns 404 and the Control
-#      Tower is reachable only through the Vite dev server. Adding the mount is an `api/`
-#      change (P14), out of P19's DELIVERABLES.
+#   2. CLOSED 2026-09-07. `api/app.py` now mounts `StaticFiles` at `/` (after the API/WS
+#      routers, so `/api/*` and `/ws/*` still resolve first), serving exactly the directory
+#      this stage already copies the frontend build into
+#      (`src/agentdx/api/static/`) — matching PRD §39.4. `/` now serves the Control Tower's
+#      `index.html`, and any unmatched path under it falls back to `index.html` too (the
+#      client-side router owns those). See `src/agentdx/api/app.py`.
 #
-#   3. Fixtures are not package data. `[tool.hatch.build.targets.wheel]` packages
+#   3. STILL OPEN. Fixtures are not package data. `[tool.hatch.build.targets.wheel]` packages
 #      `src/agentdx` only, and the committed fixture caches are `responses.json` files, not
 #      the "compressed SQLite files ... included as package data" §39.4 describes. So a
 #      `pip install agentdx` alone cannot run a fixture. This image copies the repository
-#      tree for that reason, rather than installing the wheel and hoping.
+#      tree for that reason, rather than installing the wheel and hoping. Out of scope for
+#      this pass — a packaging change to `pyproject.toml`'s wheel target, not a Docker fix.
 
 # ---------------------------------------------------------------------------------------
 # Stage 1 — Control Tower (Vite build at image-build time, per PRD §39.2's own rationale)

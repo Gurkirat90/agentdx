@@ -123,22 +123,33 @@ jobs:
       - run: just sync-frontend
       - run: cd frontend && npx playwright install --with-deps chromium
 
-      # Informational for now, NOT blocking (continue-on-error) -- added by the P18/19
-      # QA-acceptance session, 2026-08-27. Real local counts drift as gaps close -- see
-      # CONTEXT.md §6's addendum for the current, owner-confirmed per-gate breakdown
-      # rather than a snapshot here that will go stale (D-67 already corrected one such
-      # snapshot once: an earlier version of this comment miscounted its own figure).
-      # G1, G4, G6, G7, G9 depend on CLI surfaces (`--assert`, `scenario run --repeat`,
-      # `compare --baseline`, `analyze --scorecard`) that are explicit, declared-scope
-      # stubs or missing flags (P17), not bugs in this job. G10 needs
-      # bench/harness/docker_cold_start.py, which does not exist yet.
-      # Flip continue-on-error to false gate-by-gate as each underlying gap closes --
-      # flipping it wholesale before then would just make every unrelated PR red for a
-      # reason no single commit can fix, which defeats the point of a gate. This is an
-      # explicit, reported decision (see CONTEXT.md §6/§9), not a silent downgrade.
-      - name: Run all ten gates
+      # Split 2026-09-07 into a blocking group and an informational group -- the gate-by-gate
+      # flip this comment always said was the plan, once each gap's own evidence supported it
+      # (see CONTEXT.md §6 for the full per-gate account; this comment summarises rather than
+      # duplicates it). Originally added all-continue-on-error by the P18/19 QA-acceptance
+      # session, 2026-08-27, when G1/G4/G6/G7/G9 depended on CLI surfaces P17 had deliberately
+      # stubbed and G10's own harness didn't exist yet. All of that has since closed: D-82
+      # (2026-09-04) built the missing CLI surfaces, and ADR-019 (2026-09-03) closed the D-62
+      # scheduler-dispatch deadlock those surfaces depend on, unblocking G9 for the first time
+      # in this project's history (`just demo-offline` exits 0 end-to-end).
+      #
+      # BLOCKING (G1, G2, G3, G4, G5, G6, G7, G9): each is either never-waived (G2, G3 — PRD
+      # §44.3) or has a real, dated, evidenced PASS in CONTEXT.md's own gate table -- a real
+      # subprocess run, not a self-report. A regression here is a real regression.
+      - name: Run gates G1, G2, G3, G4, G5, G6, G7, G9 (blocking)
+        run: just acceptance "g1_ or g2_ or g3_ or g4_ or g5_ or g6_ or g7_ or g9_"
+
+      # INFORMATIONAL, still continue-on-error: G8 (Control Tower e2e) is self-reported only
+      # -- no independent OP-2 audit has run against P16 yet, so a real defect there should
+      # not silently pass as a false green on this job's say-so alone. G10 (Docker cold-start)
+      # needs a real Docker daemon this job may or may not have, plus an arm64 target this
+      # runner is not (`ubuntu-latest` is x86_64) -- `bench/harness/docker_cold_start.py`
+      # itself is real and reports `arch_conformant: false` honestly rather than faking a
+      # pass, but that means this step can be green without G10 itself being met. Both stay
+      # informational until each has its own real, dated confirmation to promote it.
+      - name: Run gates G8, G10 (informational)
         continue-on-error: true
-        run: just acceptance
+        run: just acceptance "g8_ or g10"
 
   frontend:
     name: frontend

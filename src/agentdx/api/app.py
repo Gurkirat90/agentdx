@@ -4,7 +4,9 @@
 `scorecard`, all under `/api`) plus `ws.router` (mounted at the root — PRD §26.2's own path
 has no `/api` prefix), installs the §26 error envelope everywhere
 (`errors.install_exception_handlers`), and stashes one `ApiState` on `app.state.agentdx` for
-the life of the process (PRD §24.2: "one process, one store file").
+the life of the process (PRD §24.2: "one process, one store file"). It also serves the built
+Control Tower frontend from `static/`, when that directory is present (PRD §39.4) — see
+`_mount_frontend`'s own docstring for the SPA-fallback reasoning.
 
 `serve` is this module's other half — Design Constraint 3: binding a non-loopback host
 requires the caller to pass `allow_non_local=True` (the CLI's `--host` flag is what sets it —
@@ -22,7 +24,8 @@ from pathlib import Path
 from typing import Final
 
 import uvicorn
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 from agentdx.api import ws
 from agentdx.api.deps import ApiState, FaultController, RunLauncher, default_store_path
@@ -31,6 +34,12 @@ from agentdx.api.routes import analysis, findings, runs, scenarios, scorecard, s
 from agentdx.config import AgentDXConfig
 
 _VERSION: Final[str] = _installed_version("agentdx")
+
+# PRD §39.4: `vite build`'s output is copied here by the Docker image (Dockerfile stage 2's
+# final `COPY --from=frontend`). Absent in every other environment — a source checkout, this
+# project's own test suite, `agentdx ui` run straight from `uv run` without a prior frontend
+# build — so every use of this path below is conditional on it actually existing.
+_STATIC_DIR: Final[Path] = Path(__file__).parent / "static"
 
 # Loopback names/addresses this process trusts without a warning (Design Constraint 3).
 # IPv4/IPv6 loopback plus the hostname most local tooling actually types — not an exhaustive
@@ -61,6 +70,38 @@ def _non_local_refusal(host: str, port: int) -> str:
         f"Re-run with `agentdx ui --host {host}` if binding beyond localhost is genuinely "
         f"intended — this server has no authentication."
     )
+
+
+def _mount_frontend(app: FastAPI, static_dir: Path) -> None:
+    """Serve the built Control Tower from `static_dir`, with SPA fallback (PRD §39.4).
+
+    A plain `StaticFiles` mount at `/` cannot do this alone, because
+    `frontend/src/routes/router.tsx` is a real History-API router (`/runs/{id}`,
+    `/runs/{id}/scorecard`), not a hash router: a deep-link navigation or a hard refresh on
+    `/runs/r_abc123` must still return `index.html` — there is no file at that path, and the
+    client-side router is what turns that HTML into the right screen once it loads. Without
+    this, refreshing on any route but `/` would 404 (PRD §39.4 does not spell this out, but
+    "agentdx ui ... serves a fully self-contained app" is not true if navigating within it
+    breaks reload). One catch-all handler covers both a real asset request
+    (`/assets/index-<hash>.js`, whatever Vite's own output layout is — never hardcoded here)
+    and the SPA-fallback case, rather than a separate `StaticFiles` mount whose own directory
+    (an exact `assets/` subpath) would need to exist at import time to avoid a startup error.
+
+    Registered after `/api` and `/ws` are already on `app.routes` (`create_app`'s own call
+    order), so Starlette's first-match routing tries those before ever reaching the catch-all
+    below — moving this call earlier would silently shadow every API route with `index.html`.
+    """
+    index_path = static_dir / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_frontend(full_path: str) -> FileResponse:
+        """Serve a real static file if one exists at this path, else the SPA shell."""
+        candidate = (static_dir / full_path).resolve()
+        if full_path and candidate.is_file() and static_dir.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        if not index_path.is_file():
+            raise HTTPException(status_code=404, detail="frontend not built into this image")
+        return FileResponse(index_path)
 
 
 def create_app(
@@ -122,6 +163,15 @@ def create_app(
     app.include_router(api_router)
     # PRD §26.2's path has no `/api` prefix — the one REST-layer exception.
     app.include_router(ws.router)
+
+    # Registered last, deliberately — see `_mount_frontend`'s own docstring for why this
+    # order matters. Conditional on the directory actually existing: absent everywhere this
+    # process doesn't run from a Docker image built by this project's own Dockerfile (a
+    # source checkout, this test suite, `uv run agentdx ui`), and `/` correctly 404s via the
+    # ordinary FastAPI "no route matched" path when it is absent, rather than this module
+    # inventing a static directory that was never built.
+    if _STATIC_DIR.is_dir():
+        _mount_frontend(app, _STATIC_DIR)
 
     return app
 

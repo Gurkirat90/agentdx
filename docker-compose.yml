@@ -6,19 +6,29 @@
 # arm64, inside the threshold §44.1 names. `just bench-docker-cold` is what measures it.
 #
 # ---------------------------------------------------------------------------------------
-# G10 CANNOT PASS AGAINST THIS FILE TODAY, AND THIS FILE IS NOT WHY
+# UPDATE 2026-09-07: the blocker below is CLOSED. G10 still needs a real Docker measurement.
 # ---------------------------------------------------------------------------------------
-# `agentdx run <fixture>` cannot complete a run: nothing in `sdk/` ever calls
-# `runtime.scheduler.Scheduler.spawn()` (D-62), so LangGraph's parallel fan-out deadlocks
-# the scheduler's single-task loop and the CLI exits 5. The `seed` service below will
-# therefore fail, `agentdx` will come up healthy with an EMPTY run list, and G10's
-# "populated run list" half will not be met.
+# `agentdx run <fixture>` used to fail with an exit 5 scheduler deadlock (D-62): nothing in
+# `sdk/` called `runtime.scheduler.Scheduler.spawn()`, so LangGraph's parallel fan-out never
+# resumed. ADR-019 (2026-09-03, candidate β) closed that gap on real Python 3.12 hardware
+# against all three fixtures. This update re-confirmed it in a sandboxed Python 3.10
+# environment (via this project's disclosed stdlib-compat shim) against a completely fresh,
+# empty data directory: `agentdx run fixtures/code_pipeline`, `fixtures/support_triage` and
+# `fixtures/research_fanout` each exit 0 with a real verdict — the same `sh -c` sequence the
+# `seed` service below runs. The `seed` step should now complete and the run list should be
+# populated, which is what G10 asks for.
 #
-# That is stated here rather than worked around. Three tempting workarounds were all
-# rejected: dropping to one fixture (the mission's own STOP CONDITION), making `seed`
-# non-blocking so `up` looks clean (hides the failure), and pre-baking a run database into
-# the image (a demo that shows a recorded result instead of running one is a lie about what
-# the tool does). See CONTEXT.md §6 and this session's NOT DONE / RISKS.
+# **Not independently re-confirmed inside an actual container** — this repo's own sandbox has
+# no Docker daemon, so `docker compose up` itself has not been run against this file since the
+# fix landed. The code path is identical; the container/network boundary is not exercised
+# here. `just bench-docker-cold` on a machine with Docker is still the authoritative G10 check,
+# and its own result file (`bench/results/docker-cold-start.json`) is what should be trusted
+# over this comment once that run happens.
+#
+# The three workarounds this file has always rejected remain rejected: dropping to one
+# fixture (the mission's own STOP CONDITION), making `seed` non-blocking so `up` looks clean
+# (hides a real failure, should one recur), and pre-baking a run database into the image (a
+# demo that shows a recorded result instead of running one is a lie about what the tool does).
 #
 # ---------------------------------------------------------------------------------------
 # Deviations from PRD §39.2's literal block, each deliberate

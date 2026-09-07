@@ -23,12 +23,24 @@ output and refuses to report a pass on any other architecture unless ``--allow-a
 passed, in which case the JSON says so and ``arch_conformant`` is false. An x86_64 number is
 a useful signal and is not the gate.
 
-**What this harness cannot fix.** As of this writing the demo cannot populate a run list at
-all: nothing in ``sdk/`` calls ``runtime.scheduler.Scheduler.spawn()`` (D-62), so every
-fixture graph deadlocks and ``docker-compose.yml``'s ``seed`` service exits non-zero. This
-script is expected to fail at the seeding step, and it reports *which* step failed rather
-than a bare timeout — the difference between "the demo is too slow" and "the demo does not
-work" is the entire diagnostic value of running it.
+**Update 2026-09-07: the D-62 blocker below is closed.** ADR-019 (2026-09-03) fixed the
+scheduler-dispatch deadlock this docstring used to describe as unconditional. `agentdx run
+<fixture>` completes end-to-end on real hardware and was re-confirmed in this project's own
+sandbox (Python 3.10 + its disclosed stdlib-compat shim) against a fresh data directory for
+all three fixtures. The `seed` step this harness measures should now complete and populate a
+real run list — **not yet re-confirmed by an actual run of this harness**, since no
+environment this project has had access to combines a Docker daemon with the fix landing.
+Whoever next runs this on a real Docker host should expect a genuine `populated: true`
+result and treat anything else as a new, real finding, not this old, closed gap resurfacing.
+The paragraph below (kept for history) describes what this harness reported *before* the fix.
+
+**What was previously unfixable, for the record.** Before 2026-09-03, the demo could not
+populate a run list at all: nothing in ``sdk/`` called ``runtime.scheduler.Scheduler.spawn()``
+(D-62), so every fixture graph deadlocked and ``docker-compose.yml``'s ``seed`` service exited
+non-zero. This harness reported *which* step failed rather than a bare timeout — the
+difference between "the demo is too slow" and "the demo does not work" is the entire
+diagnostic value of running it, and that diagnostic behavior is unchanged now that the
+underlying failure is gone.
 
 Rule E1: the JSON this writes is the file every published cold-start number must cite with a
 ``[bench:docker-cold-start.json]`` marker.
