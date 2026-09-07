@@ -210,13 +210,20 @@ shape," which is exactly what it meant before 2026-08-19.
    treat this module's self-reported PASS with the same caution the mission's own audit protocol
    assigns to any unaudited claim.
 
-1. **The formal 40-log labelled benchmark (PRD §34.3).** "Recall = 1.0 on the seeded set,
-   precision = 1.0 on the negative set" is a claim about a specific, committed 40-log corpus
-   and a `bench/` harness that publishes a confusion matrix. Neither exists yet — building the
-   corpus and the harness is a `bench/`-scoped deliverable this prompt's `DELIVERABLES` do not
-   name. What this build *can* honestly claim is precision = 1.0 on every case its own test
-   suite covers (above); it cannot yet claim a measured recall number against an independent
-   corpus, and does not claim one.
+1. ~~The formal 40-log labelled benchmark (PRD §34.3).~~ **Closed 2026-09-07.**
+   `bench/harness/race_accuracy_corpus.py` (40 logs, 20 genuine races built from ten
+   PRD-traceable shapes, 20 clean near-misses covering all five categories PRD §34.3 names —
+   ordered-by-message, identical values, locks, reducer channels, retries) and
+   `bench/harness/race_accuracy.py` (the confusion-matrix harness) now exist and are committed.
+   Measured: **precision = 1.0, recall = 1.0, F1 = 1.0** (TP=20, FP=0, TN=20, FN=0)
+   `[bench:race-accuracy.json]`. Live-mutated to confirm the result has real discriminating
+   power, not a corpus too easy to fail: forcing G4's lock guard to treat any two non-null
+   locks as "the same lock" dropped recall to 0.90 and named the two `mismatched_locks` cases
+   by id; disabling G4 entirely dropped precision to 0.833 and named all four
+   `lock_protected` cases by id — both reverted before commit. This is a deterministic,
+   seed-free classification benchmark (no wall-clock timing, no run-to-run variance the way
+   `scrub-reconstruction.json`'s figures have, D-68) — the numbers above are exact and
+   reproducible on every run of `bench/harness/race_accuracy.py`, not a distribution.
 2. **`value_hash` unavailable (PRD §14.6's fourth row).** Not implemented. `value_hash` is a
    required, non-nullable field on both `state_read` and `state_write` payloads (PRD §9.5), so
    no live code path in this build ever produces an event with one absent — there is nothing to
@@ -251,7 +258,11 @@ shape," which is exactly what it meant before 2026-08-19.
    that already exists elsewhere under a different module's own gate, not close a real gap.
 
 **Net honest statement:** this build's race detector has verified precision = 1.0 against
-every case it has been tested against (its own true-positive matrix, guard suite, and the
-false-positive suite including a real fixture and a bounded schedule frontier), and a recall
-claim that is deliberately *not* inflated beyond what a committed, auditable benchmark corpus
-would be needed to support — that corpus does not exist in this build.
+every case it has been tested against (its own true-positive matrix, guard suite, the
+false-positive suite including a real fixture and a bounded schedule frontier, and — as of
+2026-09-07 — PRD §34.3's own formal 40-log corpus), and **recall = 1.0 against that same
+committed, auditable corpus** `[bench:race-accuracy.json]`. What is still not claimed: a
+recall number against logs this project did not itself construct — the corpus is real and
+committed, but it is still this project's own synthetic corpus, not an independently-sourced
+one, and item 0 above (the second independent OP-2 audit) has not yet reviewed this benchmark
+or its corpus either.

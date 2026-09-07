@@ -1,0 +1,358 @@
+{
+  "benchmark": "race-accuracy",
+  "clean_count": 20,
+  "confusion_matrix": {
+    "false_negative": 0,
+    "false_positive": 0,
+    "true_negative": 20,
+    "true_positive": 20
+  },
+  "corpus_size": 40,
+  "environment": {
+    "implementation": "CPython",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "python": "3.10.12",
+    "system": "Linux"
+  },
+  "f1": 1.0,
+  "false_negative_case_ids": [],
+  "false_positive_case_ids": [],
+  "function_under_test": "agentdx.analysis.race.detect_conflicts(events, *, crdt_keys)",
+  "gate_status": "This is a deterministic, seed-free classification benchmark (no wall-clock timing, no randomness) \u2014 the confusion matrix and the precision/recall/F1 figures below are exact and reproducible on every run, not a distribution like the timing benchmarks in this directory.",
+  "met": true,
+  "method": "Every log in bench/harness/race_accuracy_corpus.py is built through tests.analysis.race._causal_log.CausalLog, the same vector-clock/causal_parents construction the real scheduler performs (not hand-set placeholders) \u2014 see that corpus file's own module docstring for the full account of all 40 cases and the five near-miss categories PRD \u00a734.3 names. A case is classified 'race' if detect_conflicts(events, crdt_keys=...) returns one or more findings, 'clean' otherwise; predicted label is compared against the corpus's own ground truth.",
+  "per_case": [
+    {
+      "case_id": "race_write_write_01",
+      "category": "write_write_divergent",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_write_write_02",
+      "category": "write_write_divergent",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_write_write_03",
+      "category": "write_write_divergent",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_three_agent_01",
+      "category": "three_agent_only_two_concurrent",
+      "correct": true,
+      "event_count": 7,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_three_agent_02",
+      "category": "three_agent_only_two_concurrent",
+      "correct": true,
+      "event_count": 7,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_same_agent_subtasks_01",
+      "category": "same_agent_two_subtasks",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_same_agent_subtasks_02",
+      "category": "same_agent_two_subtasks",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_stale_read_01",
+      "category": "stale_read",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_stale_read_02",
+      "category": "stale_read",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_dirty_read_01",
+      "category": "dirty_read",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_dirty_read_02",
+      "category": "dirty_read",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_torn_write_01",
+      "category": "torn_write",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_torn_write_02",
+      "category": "torn_write",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_fault_tainted_01",
+      "category": "fault_tainted",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_fault_tainted_02",
+      "category": "fault_tainted",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_mismatched_locks_01",
+      "category": "mismatched_locks",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_mismatched_locks_02",
+      "category": "mismatched_locks",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_crdt_wrong_key_01",
+      "category": "crdt_keys_names_a_different_key",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_crdt_wrong_key_02",
+      "category": "crdt_keys_names_a_different_key",
+      "correct": true,
+      "event_count": 2,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "race_four_agent_multi_writer_01",
+      "category": "four_agent_multi_writer",
+      "correct": true,
+      "event_count": 4,
+      "label": "race",
+      "predicted": "race"
+    },
+    {
+      "case_id": "clean_ordered_message_01",
+      "category": "ordered_by_message",
+      "correct": true,
+      "event_count": 4,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_ordered_message_02",
+      "category": "ordered_by_message",
+      "correct": true,
+      "event_count": 4,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_ordered_message_03",
+      "category": "ordered_by_message",
+      "correct": true,
+      "event_count": 4,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_ordered_message_04",
+      "category": "ordered_by_message",
+      "correct": true,
+      "event_count": 4,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_identical_values_01",
+      "category": "identical_concurrent_values",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_identical_values_02",
+      "category": "identical_concurrent_values",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_identical_values_03",
+      "category": "identical_concurrent_values",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_identical_values_04",
+      "category": "identical_concurrent_values",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_lock_protected_01",
+      "category": "lock_protected",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_lock_protected_02",
+      "category": "lock_protected",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_lock_protected_03",
+      "category": "lock_protected",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_lock_protected_04",
+      "category": "lock_protected",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_reducer_channel_01",
+      "category": "reducer_channel",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_reducer_channel_02",
+      "category": "reducer_channel",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_reducer_channel_03",
+      "category": "reducer_channel",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_reducer_channel_04",
+      "category": "reducer_channel",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_same_agent_retry_01",
+      "category": "same_agent_retry",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_same_agent_retry_02",
+      "category": "same_agent_retry",
+      "correct": true,
+      "event_count": 3,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_same_agent_retry_03",
+      "category": "same_agent_retry",
+      "correct": true,
+      "event_count": 2,
+      "label": "clean",
+      "predicted": "clean"
+    },
+    {
+      "case_id": "clean_same_agent_retry_04",
+      "category": "same_agent_retry",
+      "correct": true,
+      "event_count": 4,
+      "label": "clean",
+      "predicted": "clean"
+    }
+  ],
+  "precision": 1.0,
+  "precision_met": true,
+  "race_count": 20,
+  "recall": 1.0,
+  "recall_met": true,
+  "requirement": "PRD \u00a734.3",
+  "requirement_text": "Method: a labelled corpus of 40 synthetic event logs: 20 containing a genuine race (by construction), 20 free of races but containing near-miss patterns (reducer channels, locks, ordered writes, identical values, retries). Compute precision, recall and F1. Gate: recall = 1.0 on the seeded set; precision = 1.0 on the negative set.",
+  "thresholds": {
+    "precision": 1.0,
+    "recall": 1.0
+  }
+}
