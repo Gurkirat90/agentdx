@@ -175,18 +175,21 @@ class AbortGuardTripped(RuntimeError):
 
     Raising this is how a `FaultInjectorHook` override signals "stop the run now" from inside
     `pre_schedule` — the only interception point this build has continuous access to (see
-    `AbortGuardMonitor`'s class docstring). Declared gap: `runtime.scheduler.RunState.
-    ABORTED_GUARD` exists as a legal lifecycle target from `RUNNING` (`scheduler.py`'s own
-    `_LEGAL_TRANSITIONS`), but nothing in the fixed scheduler transitions to it — raising here
-    propagates through `Scheduler.run()`'s existing `except BaseException` handler, which
-    moves the run to `FAILED`, not `ABORTED_GUARD`. Reaching `ABORTED_GUARD` specifically would
-    need a second, dedicated scheduler.py touch (a public abort method, or a hook return value
-    the scheduler interprets) beyond the one narrow, justified addition this prompt already
-    makes (`fault_id_for`) — judged out of scope here and recorded as NOT DONE rather than
-    guessed at with a second unreviewed scheduler change in the same prompt. The partial event
-    log is retained regardless (every event up to the trip was already written and flushed —
-    NFR-13 holds), so "analysable partial log" is satisfied even though the terminal `RunState`
-    value is not PRD-exact.
+    `AbortGuardMonitor`'s class docstring). `runtime.scheduler.RunState.ABORTED_GUARD` exists
+    as a legal lifecycle target from `RUNNING` (`scheduler.py`'s own `_LEGAL_TRANSITIONS`), and
+    `Scheduler.run()` now has a dedicated `except AbortGuardTripped:` branch, ordered before its
+    generic `except BaseException:`, that transitions there specifically
+    (op2-audit-p09-second.md finding #5 — this docstring previously described that branch as
+    NOT DONE and every trip landed indistinguishably in `FAILED`; verified live by reproducing
+    the exact trip this docstring's own example describes and confirming the terminal state is
+    now `ABORTED_GUARD`, not `FAILED`). **Still NOT DONE, disclosed rather than folded into that
+    fix**: the injector itself does not disarm and in-flight tasks are not cancelled as part of
+    this transition — PRD §13.6's "in-flight tasks are cancelled" clause is a second, separate
+    piece of work touching `Scheduler`'s own task-lifecycle internals (the surface five
+    concurrency ADRs — ADR-017 through ADR-022 — already sit on), left for its own reviewed
+    change. The partial event log is retained regardless (every event up to the trip was
+    already written and flushed — NFR-13 holds), so "analysable partial log" is satisfied
+    either way.
     """
 
     def __init__(self, trip: GuardTrip) -> None:

@@ -43,7 +43,7 @@ from agentdx.runtime.faults.safety import (
     reauthorize,
 )
 from agentdx.runtime.faults.taint import FaultTaintTracker
-from agentdx.runtime.scheduler import Scheduler
+from agentdx.runtime.scheduler import RunState, Scheduler
 from agentdx.scenario.schema import TargetKind, TriggerKind
 from tests.unit.faults.conftest import resolved_scenario
 from tests.unit.runtime.conftest import MemorySink
@@ -233,3 +233,8 @@ def test_a_tripped_abort_guard_stops_the_run_and_the_partial_log_survives() -> N
     assert "E-GUARD-001" in str(excinfo.value)
     # The partial log is real, not empty — events up to the trip were flushed (NFR-13).
     assert len(sink.events()) > 0
+    # PRD §13.6: "the log is sealed with run_end.status = aborted_guard". Before
+    # op2-audit-p09-second.md finding #5's fix, `Scheduler.run()` had no `except
+    # AbortGuardTripped` branch, so this trip landed in RunState.FAILED — indistinguishable
+    # from a genuine scheduler defect. It must now be ABORTED_GUARD specifically.
+    assert scheduler.state == RunState.ABORTED_GUARD

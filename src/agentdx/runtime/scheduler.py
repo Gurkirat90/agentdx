@@ -68,6 +68,7 @@ from agentdx.runtime.determinism import (
     NondeterminismLeakWarning,
     trap,
 )
+from agentdx.runtime.faults.safety import AbortGuardTripped
 
 if TYPE_CHECKING:
     # Type-only: annotates `_call_tokens` (`begin_call`/`end_call`, ADR-018). `bind_task`/
@@ -872,6 +873,28 @@ class Scheduler:
                 with guard:
                     self._rng = guard.seeded_random
                     await self._scheduler_loop()
+            except AbortGuardTripped:
+                # PRD §13.6: "the log is sealed with run_end.status = aborted_guard" —
+                # ABORTED_GUARD is a legal RUNNING-successor transition (see
+                # _LEGAL_TRANSITIONS above), reached only from here. A FaultInjectorHook.
+                # pre_schedule override (runtime.faults.safety.AbortGuardMonitor, driven
+                # today by runtime.faults.process.CrashInjector) raises this to signal a
+                # tripped guard specifically — distinct from every other BaseException the
+                # generic branch below still routes to FAILED. Previously this exception fell
+                # through to that generic branch and every abort-guard trip was reported as
+                # FAILED, indistinguishable from a genuine scheduler defect — closing
+                # AbortGuardTripped's own documented gap (op2-audit-p09-second.md finding #5).
+                # NOT DONE here, disclosed rather than guessed at: the injector itself does
+                # not disarm and in-flight tasks are not cancelled as part of this transition
+                # — PRD §13.6's "in-flight tasks are cancelled" clause is a second, separate
+                # piece of work touching this scheduler's own task-lifecycle internals (five
+                # concurrency ADRs this session — ADR-017 through ADR-022 — already sit on
+                # exactly that surface), left for its own reviewed change rather than folded
+                # in here. The partial event log is retained regardless (every event up to
+                # the trip was already written and flushed — NFR-13 holds independent of this
+                # fix), so "analysable partial log" is satisfied either way.
+                self._transition(RunState.ABORTED_GUARD)
+                raise
             except BaseException:
                 # A scheduler-internal error (deadlock, livelock, ...): the run cannot be
                 # analysed, so RUNNING -> FAILED directly, not via ANALYSING.

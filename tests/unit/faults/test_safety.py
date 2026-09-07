@@ -55,6 +55,66 @@ def test_reauthorize_passes_for_universal_blast_radius() -> None:
 
 
 # ---------------------------------------------------------------------------------------
+# BlastRadius.contains — every TargetKind, in-radius and out-of-radius (PRD §13.4)
+# ---------------------------------------------------------------------------------------
+
+
+def test_blast_radius_contains_every_target_kind_when_in_radius() -> None:
+    """One `BlastRadius` naming exactly one member per kind — each must match its own kind.
+
+    op2-audit-p09-second.md finding #3 (second half): a live mutation forcing
+    `BlastRadius.contains`'s `TOOL` branch to always return `True` left the entire
+    `tests/{unit,integration}/faults/` suite green — `.contains()` was exercised only for
+    `STATE_KEY`, `AGENT`, and the `universal=True` shortcut, never `TOOL`, `EDGE`, or
+    `PROVIDER`. This test (and the out-of-radius one below) parametrizes over all five
+    `TargetKind` members so a regression in any one branch fails here directly, not silently.
+    """
+    radius = BlastRadius(
+        agents=frozenset({"reviewer"}),
+        tools=frozenset({"deploy"}),
+        edges=frozenset({"planner->coder"}),
+        state_keys=("draft.*",),
+        providers=frozenset({"openai"}),
+    )
+    cases = [
+        (TargetKind.AGENT, "reviewer"),
+        (TargetKind.TOOL, "deploy"),
+        (TargetKind.EDGE, "planner->coder"),
+        (TargetKind.STATE_KEY, "draft.body"),
+        (TargetKind.PROVIDER, "openai"),
+    ]
+    for kind, value in cases:
+        assert radius.contains(kind, value) is True, f"{kind} should be in radius"
+
+
+def test_blast_radius_rejects_every_target_kind_when_out_of_radius() -> None:
+    """Same radius as above, queried with a value belonging to no declared set for its kind."""
+    radius = BlastRadius(
+        agents=frozenset({"reviewer"}),
+        tools=frozenset({"deploy"}),
+        edges=frozenset({"planner->coder"}),
+        state_keys=("draft.*",),
+        providers=frozenset({"openai"}),
+    )
+    cases = [
+        (TargetKind.AGENT, "coder"),
+        (TargetKind.TOOL, "release"),
+        (TargetKind.EDGE, "coder->tester"),
+        (TargetKind.STATE_KEY, "config.flag"),
+        (TargetKind.PROVIDER, "anthropic"),
+    ]
+    for kind, value in cases:
+        assert radius.contains(kind, value) is False, f"{kind} should be out of radius"
+
+
+def test_blast_radius_with_no_declared_members_rejects_every_kind() -> None:
+    """An empty, non-universal `BlastRadius` authorises nothing, for any kind."""
+    radius = BlastRadius()
+    for kind in TargetKind:
+        assert radius.contains(kind, "anything") is False
+
+
+# ---------------------------------------------------------------------------------------
 # SteadyStateHypothesis (PRD §13.5)
 # ---------------------------------------------------------------------------------------
 

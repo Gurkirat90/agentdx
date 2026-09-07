@@ -69,10 +69,24 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from agentdx.events.schema import Event
+
+
+_UNKNOWN_INJECTION_SENTINEL: Final[int] = 1 << 62
+"""Tie-break default for a rule-2 candidate `fault_id` with no recorded `injected_at` entry.
+
+Genuinely unreachable in a correctly produced log: every fault's first tainted event is
+always its own `fault_injected`, recorded into `injected_at` before any downstream event
+referencing it can be processed (both `compute_causal_taint` and `FaultTaintTracker.record`
+populate `injected_at` at the same point they populate the taint map itself, in `seq` order).
+Named and shared by both `compute_causal_taint` and `FaultTaintTracker.resolve` anyway, so the
+two independent tie-break implementations cannot silently disagree on this hypothetical edge
+case — they previously used `event.seq` ("as early as possible, i.e. right now") and `1 << 62`
+("definitely not earliest") respectively, two different answers for the identical situation
+(op2-audit-p09-second.md finding #6)."""
 
 
 # ---------------------------------------------------------------------------------------
@@ -122,10 +136,56 @@ def compute_causal_taint(events: Sequence[Event]) -> dict[int, str]:
         # at, falling back to the fault_id string itself only if two candidates were injected
         # at literally the same seq (cannot happen for distinct faults — each fault has
         # exactly one fault_injected event — but a stable tie-break costs nothing).
-        best = min(candidates, key=lambda fid: (injected_at.get(fid, event.seq), fid))
+        best = min(
+            candidates, key=lambda fid: (injected_at.get(fid, _UNKNOWN_INJECTION_SENTINEL), fid)
+        )
         taint[event.seq] = best
 
     return taint
+
+
+def compute_full_taint(events: Sequence[Event]) -> dict[int, frozenset[str]]:
+    """Return `{seq: frozenset[fault_id]}` — every fault contributing to each event (D-46).
+
+    The full-set counterpart to `compute_causal_taint`'s "earliest wins" `event.fault_id`. PRD
+    §9.4: "Where multiple faults contribute, `fault_id` holds the earliest and
+    `payload.fault_ids` holds the full set" — **D-46** (`CONTEXT.md` §9, 2026-08-17) rules that
+    the second half is this offline, pure, analysis-time function rather than a second
+    persisted schema field (a literal `payload.fault_ids` field would have been a second
+    `SCHEMA_VERSION` change in the same repair pass as D-45's already-blocked one, deliberately
+    avoided). Walks the exact same causal graph `compute_causal_taint` already walks, in the
+    same single seq-ascending pass, so the two functions agree on which events are tainted at
+    all — this one just keeps every contributing `fault_id` instead of collapsing to the
+    earliest. Was approved (D-46) but never implemented against this tree until
+    op2-audit-p09-second.md finding #6 flagged it as still missing.
+
+    Args:
+        events: Same contract as `compute_causal_taint` — a sequence of already-stamped
+            events, in ascending `seq` order.
+
+    Returns:
+        A mapping from `seq` to the full, non-empty set of `fault_id`s contributing to that
+        event. A `seq` absent from the mapping carries no taint from any fault — the same
+        absent-means-untainted convention `compute_causal_taint` uses.
+    """
+    full: dict[int, frozenset[str]] = {}
+
+    for event in events:
+        direct = _direct_fault_id(event)
+        if direct is not None and event.type.value in ("fault_injected", "fault_effect"):
+            # Same rule-1 short-circuit as compute_causal_taint: a fault's own
+            # fault_injected/fault_effect events are never emitted with declared causal
+            # parents in this codebase (every _emit_fault_injected_if_first/_emit_fault_effect
+            # call site stamps with `causes=()`), so there is nothing real to union in here —
+            # kept structurally parallel to compute_causal_taint rather than assumed dead code.
+            full[event.seq] = frozenset({direct})
+            continue
+
+        contributing = frozenset[str]().union(*(full[p] for p in event.causal_parents if p in full))
+        if contributing:
+            full[event.seq] = contributing
+
+    return full
 
 
 def _direct_fault_id(event: Event) -> str | None:
@@ -202,7 +262,10 @@ class FaultTaintTracker:
 
         candidates = [self.seq_taint[p] for p in causal_parents if p in self.seq_taint]
         if candidates:
-            return min(candidates, key=lambda fid: (self.injected_at.get(fid, 1 << 62), fid))
+            return min(
+                candidates,
+                key=lambda fid: (self.injected_at.get(fid, _UNKNOWN_INJECTION_SENTINEL), fid),
+            )
 
         if agent_id is not None and agent_id in self.agent_taint:
             return self.agent_taint[agent_id]
@@ -248,4 +311,4 @@ def taint_summary(taint: Mapping[int, str]) -> dict[str, int]:
     return out
 
 
-__all__ = ["FaultTaintTracker", "compute_causal_taint", "taint_summary"]
+__all__ = ["FaultTaintTracker", "compute_causal_taint", "compute_full_taint", "taint_summary"]

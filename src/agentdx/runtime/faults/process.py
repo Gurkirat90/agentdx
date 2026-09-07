@@ -191,14 +191,58 @@ class CrashInjector(FaultInjectorHook):
     def _crash_faults_for(self, agent_id: str) -> tuple[ArmedFault, ...]:
         return tuple(f for f in self._registry.by_type("agent_crash") if f.decl.target == agent_id)
 
+    def _known_live_agents(self) -> frozenset[str]:
+        """Agents this injector has ever seen in a `pre_schedule` `runnable` list, minus crashed.
+
+        The only agent population this hook can observe — a run's full agent roster is not
+        threaded into this class's construction (see class docstring / `docs/chaos-safety.md`
+        §"Interception point mapping"). Exact for the common case PRD §12.2's Safety row exists
+        to guard (crashing the last agent left standing, including the trivial single-agent
+        case, since a single agent's only task always appears in `runnable` before any fault
+        could possibly target it) — an agent that has genuinely never appeared in `runnable`
+        yet is simply not counted at all, which can only ever make this check *more*
+        conservative (never fire a crash it should have allowed), never less.
+
+        Excludes `runtime.scheduler.Scheduler.run`'s own synthetic root-coroutine agent_id
+        (hardcoded there as the literal string `"root"`) — it is bookkeeping for the run's
+        entry-point task, never a real graph agent a scenario could name as an `agent_crash`
+        target, and it is always present in `_task_agent` for the whole run. Counting it would
+        make this Safety check permanently unsatisfiable for any single-agent scenario (there
+        would always be a phantom second "live agent"), defeating the point of the check —
+        found while writing this fix's own regression tests, not by the audit itself.
+        """
+        known = frozenset(self._task_agent.values())
+        return frozenset(a for a in known if a != "root" and a not in self._crashed_agents)
+
+    def _would_leave_no_live_agent(self, agent_id: str) -> bool:
+        """PRD §12.2 Safety: `agent_crash` cannot leave a run with zero live agents.
+
+        True when `agent_id` is the only known-live agent right now — crashing it would bring
+        the live count to zero. See `_known_live_agents` for what "known" means here.
+        """
+        return self._known_live_agents() <= {agent_id}
+
     def _due_fault(self, agent_id: str) -> ArmedFault | None:
         """Return the first not-yet-fired `agent_crash` fault targeting `agent_id`.
 
-        Only returned if its trigger is true right now; otherwise `None`.
+        Only returned if its trigger is true right now and firing it would not leave the run
+        with zero live agents (PRD §12.2 Safety row: "cannot crash the last live agent unless
+        `allow_total_failure: true`") — otherwise `None`. A fault whose trigger is true but
+        that is blocked by this Safety check is silently skipped, not disarmed: it is
+        re-evaluated (and may fire) on a later step, e.g. once another agent has crashed or
+        `allow_total_failure` was set all along (op2-audit-p09-second.md finding #1 —
+        `_would_leave_no_live_agent` did not exist in this file before this fix, and a
+        single-agent run crashed its only agent unconditionally).
         """
         for armed in self._crash_faults_for(agent_id):
-            if triggers.should_fire(armed, virtual_ts_ms=self._clock.now_ms(), stream=self._stream):
-                return armed
+            if not triggers.should_fire(
+                armed, virtual_ts_ms=self._clock.now_ms(), stream=self._stream
+            ):
+                continue
+            allow_total_failure = bool(armed.decl.params.get("allow_total_failure", False))
+            if self._would_leave_no_live_agent(agent_id) and not allow_total_failure:
+                continue
+            return armed
         return None
 
     def _emit_fault_injected_if_first(self, armed: ArmedFault) -> None:
@@ -272,8 +316,19 @@ class CrashInjector(FaultInjectorHook):
 
         self._ready_due_restarts(runnable)
 
+        # Register every runnable task's agent_id *before* evaluating any crash trigger below
+        # — a separate pass, not folded into the loop that follows. `_due_fault` consults
+        # `_known_live_agents` (via `_task_agent`'s values) to enforce PRD §12.2's "cannot
+        # crash the last live agent" Safety row; if registration and evaluation shared one
+        # pass, a step that introduces several agents for the first time simultaneously (e.g.
+        # a `_root` that spawns two agents before either has ever appeared in a prior step's
+        # `runnable`) would see only however many of them the loop had already reached by the
+        # time it evaluated the first one's crash trigger, undercounting live agents that are
+        # genuinely present this same step and firing a refusal PRD §12.2 does not intend.
         for task in runnable:
             self._task_agent[task.task_id] = task.agent_id
+
+        for task in runnable:
             if task.state is not TaskState.PENDING:
                 continue
             if task.agent_id in self._crashed_agents and task.agent_id not in {

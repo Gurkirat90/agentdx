@@ -126,3 +126,22 @@ def test_fault_random_stream_values_are_in_range() -> None:
     for _ in range(200):
         value = stream.next_permille()
         assert 0 <= value < 1000
+
+
+def test_seeded_stream_42_matches_independently_computed_reference_values() -> None:
+    """`seeded_stream(42)`'s first 10 draws, pinned against values computed independently.
+
+    op2-audit-p09-second.md finding #4: `test_probability_trigger_matches_stream_draw_exactly`
+    (above) constructs its own "expected" side by calling `next_permille()` on a second,
+    identically-seeded stream — so a bug in `next_permille`'s own algorithm (e.g. a `% 1000`
+    -> `% 100` modulus inversion) would move both sides identically and never fail that test.
+    The values below were computed in a standalone script directly against
+    `hashlib.blake2b`, matching this module's own documented algorithm
+    (`blake2b(f"{seed}:{counter}")`'s leading 8 bytes, big-endian, mod 1000, counter starting
+    at 1) — never by calling `FaultRandomStream.next_permille` itself — so this test is
+    decisive against exactly the class of bug the tautological one cannot catch.
+    """
+    expected = [103, 624, 129, 312, 364, 881, 744, 738, 210, 23]
+    stream = seeded_stream(42)
+    actual = [stream.next_permille() for _ in range(len(expected))]
+    assert actual == expected

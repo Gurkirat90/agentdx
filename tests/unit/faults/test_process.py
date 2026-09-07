@@ -17,13 +17,19 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from agentdx.config import SchedulerConfig
 from agentdx.events.schema import DraftEvent, Event, EventType
 from agentdx.events.writer import EventWriter
 from agentdx.runtime.clock import VirtualClock
 from agentdx.runtime.faults.process import AgentCrashed, CrashInjector
-from agentdx.runtime.faults.registry import FaultRegistry
-from agentdx.runtime.faults.safety import AbortGuardMonitor, AbortGuardTripped
+from agentdx.runtime.faults.registry import BlastRadius, FaultRegistry
+from agentdx.runtime.faults.safety import (
+    AbortGuardMonitor,
+    AbortGuardTripped,
+    ChaosAuthorizationError,
+)
 from agentdx.runtime.faults.taint import FaultTaintTracker
 from agentdx.runtime.scheduler import Scheduler
 from tests.unit.events.factories import sample_payload
@@ -42,7 +48,21 @@ def _build(
     resolved = resolved_scenario(
         faults=faults
         if faults is not None
-        else [{"type": "agent_crash", "agent": "reviewer", "at_virtual_ts": 3000}]
+        # allow_total_failure: true — most callers here spawn "reviewer" as the harness's
+        # only real agent (root's own "root" agent_id does not count as live; see
+        # CrashInjector._known_live_agents), so without this the PRD §12.2 Safety row this
+        # class now enforces (op2-audit-p09-second.md finding #1) would silently skip the
+        # crash these tests exist to exercise. The dedicated single-agent Safety tests below
+        # construct their own fault dicts explicitly, without this override, specifically to
+        # exercise the refusal.
+        else [
+            {
+                "type": "agent_crash",
+                "agent": "reviewer",
+                "at_virtual_ts": 3000,
+                "allow_total_failure": True,
+            }
+        ]
     )
     registry = FaultRegistry.from_resolved_scenario(resolved, is_fixture_target=True)
     clock = VirtualClock()
@@ -90,7 +110,15 @@ async def _mid_flight_target(scheduler: Scheduler, marker: list[str]) -> None:
 
 def test_crash_via_coro_swap_before_first_run_never_executes_agent_code() -> None:
     scheduler, sink, _injector = _build(
-        seed=1, faults=[{"type": "agent_crash", "agent": "reviewer", "at_virtual_ts": 0}]
+        seed=1,
+        faults=[
+            {
+                "type": "agent_crash",
+                "agent": "reviewer",
+                "at_virtual_ts": 0,
+                "allow_total_failure": True,
+            }
+        ],
     )
     marker: list[str] = []
 
@@ -236,6 +264,152 @@ def test_non_recoverable_crash_records_no_pending_restart() -> None:
 
     assert injector._pending_restarts == []
     assert "reviewer" in injector._crashed_agents
+
+
+async def _solo_target(marker: list[str]) -> None:
+    """A single-agent run's only agent — never yields, so nothing else ever runs alongside it."""
+    marker.append("ran")
+
+
+def test_single_agent_crash_is_silently_skipped_without_allow_total_failure() -> None:
+    """PRD §12.2 Safety: "cannot crash the last live agent unless `allow_total_failure: true`".
+
+    op2-audit-p09-second.md finding #1 (CRITICAL): a single-agent run crashed its only agent
+    unconditionally before this fix — no notion of "how many agents are still live" existed
+    anywhere in this file. A trigger that is due but blocked by this rule is silently skipped
+    (not disarmed — see `CrashInjector._due_fault`'s own docstring), so the agent's own
+    coroutine runs to completion undisturbed and no `fault_injected`/`fault_effect` event is
+    ever written for it.
+    """
+    scheduler, sink, _injector = _build(
+        seed=1, faults=[{"type": "agent_crash", "agent": "reviewer", "at_virtual_ts": 0}]
+    )
+    marker: list[str] = []
+
+    async def _root() -> None:
+        scheduler.spawn(_solo_target(marker), agent_id="reviewer")
+
+    asyncio.run(scheduler.run(_root()))
+
+    assert marker == ["ran"]  # the agent's own body ran to completion — never crashed
+    fault_events = [
+        e for e in sink.events() if e.type in (EventType.FAULT_INJECTED, EventType.FAULT_EFFECT)
+    ]
+    assert fault_events == []
+
+
+def test_single_agent_crash_with_allow_total_failure_false_is_also_skipped() -> None:
+    """Explicit `allow_total_failure: false` behaves identically to leaving it unset."""
+    scheduler, sink, _injector = _build(
+        seed=1,
+        faults=[
+            {
+                "type": "agent_crash",
+                "agent": "reviewer",
+                "at_virtual_ts": 0,
+                "allow_total_failure": False,
+            }
+        ],
+    )
+    marker: list[str] = []
+
+    async def _root() -> None:
+        scheduler.spawn(_solo_target(marker), agent_id="reviewer")
+
+    asyncio.run(scheduler.run(_root()))
+
+    assert marker == ["ran"]
+    fault_events = [
+        e for e in sink.events() if e.type in (EventType.FAULT_INJECTED, EventType.FAULT_EFFECT)
+    ]
+    assert fault_events == []
+
+
+def test_single_agent_crash_with_allow_total_failure_true_fires_normally() -> None:
+    """`allow_total_failure: true` is the explicit opt-in that lifts the Safety row's refusal."""
+    scheduler, sink, _injector = _build(
+        seed=1,
+        faults=[
+            {
+                "type": "agent_crash",
+                "agent": "reviewer",
+                "at_virtual_ts": 0,
+                "allow_total_failure": True,
+            }
+        ],
+    )
+    marker: list[str] = []
+
+    async def _root() -> None:
+        scheduler.spawn(_solo_target(marker), agent_id="reviewer")
+
+    asyncio.run(scheduler.run(_root()))
+
+    assert marker == []  # crashed before its own body ever ran
+    fault_events = [
+        e for e in sink.events() if e.type in (EventType.FAULT_INJECTED, EventType.FAULT_EFFECT)
+    ]
+    assert [e.type for e in fault_events] == [EventType.FAULT_INJECTED, EventType.FAULT_EFFECT]
+
+
+def test_multi_agent_crash_still_fires_when_a_survivor_remains() -> None:
+    """Sanity check: the Safety row must not over-trigger — a crash with a survivor still fires."""
+    scheduler, sink, _injector = _build(
+        seed=1, faults=[{"type": "agent_crash", "agent": "reviewer", "at_virtual_ts": 0}]
+    )
+    marker: list[str] = []
+
+    async def _bystander() -> None:
+        await scheduler.yield_point("bystander_step")
+
+    async def _root() -> None:
+        scheduler.spawn(_pending_target(marker), agent_id="reviewer")
+        scheduler.spawn(_bystander(), agent_id="coder")
+
+    asyncio.run(scheduler.run(_root()))
+
+    assert marker == []  # reviewer's own body never ran — crashed before first run
+    fault_events = [
+        e for e in sink.events() if e.type in (EventType.FAULT_INJECTED, EventType.FAULT_EFFECT)
+    ]
+    assert len(fault_events) == 2
+
+
+def test_fire_time_reauthorization_refuses_a_crash_whose_radius_narrowed_after_arming() -> None:
+    """PRD §13.4's runtime defence-in-depth check, exercised through a real `CrashInjector`.
+
+    op2-audit-p09-second.md finding #3: every real fire-time reauthorization test in this
+    suite called `safety.reauthorize` directly, never through a real injector encountering a
+    blast radius narrowed after arming — a mutation deleting all four production
+    `safety.reauthorize(...)` call sites left the entire suite green. This test arms inside
+    the radius, narrows the *live registry's* `blast_radius` (the same object `_crash` re-reads
+    on every call — see `_crash`'s own `self._registry.blast_radius` read), then fires, and
+    requires `ChaosAuthorizationError` — deleting `process.py`'s `safety.reauthorize` call must
+    turn this test red.
+    """
+    resolved = resolved_scenario(
+        faults=[{"type": "agent_crash", "agent": "reviewer", "at_virtual_ts": 0}],
+        chaos_opt_in=True,
+        blast_radius={"agents": ["reviewer"]},
+    )
+    registry = FaultRegistry.from_resolved_scenario(resolved, is_fixture_target=False)
+    clock = VirtualClock()
+    taint = FaultTaintTracker()
+
+    def _stamp(draft: DraftEvent, causes: object) -> None:
+        return None
+
+    injector = CrashInjector(registry=registry, clock=clock, seed=1, stamp=_stamp, taint=taint)  # type: ignore[arg-type]
+
+    # Narrow the radius after arming — "reviewer" is no longer authorised, though it was when
+    # `FaultRegistry.from_resolved_scenario` armed it above. `FaultRegistry` is a plain
+    # (non-frozen) dataclass; only `blast_radius` itself (`BlastRadius`) is frozen.
+    registry.blast_radius = BlastRadius(agents=frozenset({"coder"}))
+    armed = registry.faults[0]
+
+    with pytest.raises(ChaosAuthorizationError) as excinfo:
+        injector._crash(armed, "reviewer")
+    assert "E-CHAOS-001" in str(excinfo.value)
 
 
 def test_guard_monitor_wired_through_pre_schedule_trips_and_raises() -> None:

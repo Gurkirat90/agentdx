@@ -99,6 +99,7 @@ class TransportFaultInjector:
         seed: int,
         stamp: Callable[[DraftEvent, Sequence[int]], Event],
         taint: FaultTaintTracker,
+        max_virtual_duration_ms: int | None = None,
     ) -> None:
         """Bind to one run's registry, seeded stream, stamping boundary and taint tracker.
 
@@ -114,11 +115,22 @@ class TransportFaultInjector:
                 is equally satisfiable by a test harness's own stand-in (see module docstring).
             taint: The run's shared `FaultTaintTracker` — the same instance every fault-class
                 module in the run shares (`docs/chaos-safety.md` §"Wiring the taint tracker").
+            max_virtual_duration_ms: The run's own abort-guard budget (the resolved scenario's
+                `guards.max_virtual_duration_ms` — the same value `safety.AbortGuardMonitor` is
+                built from), or `None` if the caller has none to give. `decide_latency` clamps
+                its own proposed delay against whatever of this budget remains at the moment of
+                the call — PRD §12.2's `latency` Safety row ("Bounded by
+                `max_virtual_duration_ms`"). Not a per-fault `params` entry (deliberately: this
+                is a run-wide guard, not something a scenario author sets per `latency:` fault
+                declaration — `scenario.schema.FAULT_CATALOGUE["latency"].params` has no such
+                key), so it is threaded in at construction instead, the same way a caller would
+                thread it into `safety.AbortGuardMonitor.from_resolved_guards`.
         """
         self._registry = registry
         self._stream = triggers.seeded_stream(seed)
         self._stamp = stamp
         self._taint = taint
+        self._max_virtual_duration_ms = max_virtual_duration_ms
         self._pending_direct_fault_id: str | None = None
         """Same mechanism, same synchronous-safety argument, as `CrashInjector`'s field of the
         same name — see that class's docstring."""
@@ -182,6 +194,13 @@ class TransportFaultInjector:
                 applied = delay_ms * (armed.fire_count + 1)
             else:
                 applied = delay_ms
+            if self._max_virtual_duration_ms is not None:
+                # PRD §12.2 `latency` Safety row: "Bounded by `max_virtual_duration_ms`" — a
+                # proposed delay is clamped to whatever budget remains, never left free to push
+                # the run past it (op2-audit-p09-second.md finding #2: this class had no
+                # `max_virtual_duration_ms` parameter at all before this fix, so the rule was
+                # structurally unexpressible, not merely unenforced).
+                applied = min(applied, max(0, self._max_virtual_duration_ms - virtual_ts_ms))
             armed.record_fire(virtual_ts_ms=virtual_ts_ms, target=target)
             self._emit_fault_effect(armed, effect="delay", target=target, delay_virtual_ms=applied)
             return LatencyDecision(armed=armed, extra_delay_ms=applied)
@@ -195,7 +214,12 @@ class TransportFaultInjector:
         return tuple(f for f in self._registry.by_type("message_drop") if f.decl.target == edge)
 
     def decide_drop(
-        self, *, edge: str, virtual_ts_ms: int, message_count: int | None = None
+        self,
+        *,
+        edge: str,
+        virtual_ts_ms: int,
+        message_count: int | None = None,
+        carries_run_end: bool = False,
     ) -> DropDecision:
         """Return whether a message in flight on `edge` should be dropped right now.
 
@@ -209,7 +233,28 @@ class TransportFaultInjector:
         trigger first, effect-probability second — so the stream's own determinism guarantee
         (same seed, same draw order, same outcomes) is preserved regardless of which faults are
         armed (PRD §12.3's own pseudocode evaluates a fault's trigger before any of its params).
+
+        Args:
+            edge: The `"a->b"` edge this delivery is on — matched against `message_drop`
+                faults' own `target`.
+            virtual_ts_ms: The scheduler's virtual clock reading at this delivery.
+            message_count: The edge's delivered message count so far, for `AFTER_N_MESSAGES`
+                triggers. Same laziness contract as `decide_latency`'s parameter of the same
+                name.
+            carries_run_end: True when the delivery this call is deciding about carries the
+                run's own `run_end` control message. PRD §12.2's `message_drop` Safety row
+                ("Cannot drop a `run_end` control message") is enforced here as an unconditional
+                early return — before any trigger/probability evaluation, so it also never
+                touches `self._stream`: a caller that marks the same logical delivery the same
+                way on every replay keeps the stream's draw sequence identical either way,
+                preserving I1. The caller (harness, and eventually the SDK message-delivery
+                wrapper) is the one place that actually knows a delivery's message kind — this
+                class has no visibility into message content itself, so it cannot infer this on
+                its own (op2-audit-p09-second.md finding #2: `decide_drop` had no parameter at
+                all through which a caller could express this before this fix).
         """
+        if carries_run_end:
+            return DropDecision(armed=None, dropped=False)
         for armed in self._drop_faults_for(edge):
             if not triggers.should_fire(
                 armed,

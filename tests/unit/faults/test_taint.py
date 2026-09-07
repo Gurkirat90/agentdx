@@ -8,7 +8,12 @@ independent check `compute_causal_taint`'s own docstring describes it as.
 from __future__ import annotations
 
 from agentdx.events.schema import EventType
-from agentdx.runtime.faults.taint import FaultTaintTracker, compute_causal_taint, taint_summary
+from agentdx.runtime.faults.taint import (
+    FaultTaintTracker,
+    compute_causal_taint,
+    compute_full_taint,
+    taint_summary,
+)
 from tests.unit.events.factories import make_event
 
 
@@ -70,6 +75,64 @@ def test_earliest_injected_fault_wins_when_two_faults_both_reach_an_event() -> N
 def test_taint_summary_counts_events_per_fault_id() -> None:
     summary = taint_summary({0: "f_00", 1: "f_00", 2: "f_01"})
     assert summary == {"f_00": 2, "f_01": 1}
+
+
+# ---------------------------------------------------------------------------------------
+# compute_full_taint (D-46, op2-audit-p09-second.md finding #6) — the full contributing set
+# ---------------------------------------------------------------------------------------
+
+
+def test_compute_full_taint_matches_compute_causal_taint_for_a_single_fault() -> None:
+    """With exactly one fault in play, the full set is always the singleton {that fault}."""
+    events = [
+        _fault_event(EventType.FAULT_INJECTED, seq=0, fault_id="f_00", causal_parents=[]),
+        make_event(EventType.TOOL_CALL, seq=1, causal_parents=[0], agent_id="reviewer"),
+        _fault_event(EventType.FAULT_EFFECT, seq=2, fault_id="f_00", causal_parents=[0]),
+        make_event(EventType.STATE_WRITE, seq=3, causal_parents=[], agent_id="planner"),
+    ]
+    full = compute_full_taint(events)  # type: ignore[arg-type]
+    assert full[0] == frozenset({"f_00"})
+    assert full[1] == frozenset({"f_00"})
+    assert full[2] == frozenset({"f_00"})
+    assert 3 not in full  # the causally-unrelated event carries no taint from any fault
+
+
+def test_compute_full_taint_keeps_every_contributing_fault_when_earliest_wins_collapses() -> None:
+    """PRD §9.4: `fault_id` holds the earliest, `fault_ids` (this function) holds the full set.
+
+    Same causal shape as `test_earliest_injected_fault_wins_when_two_faults_both_reach_an_event`
+    above — `compute_causal_taint` reports only `f_00` (the earlier) for seq3;
+    `compute_full_taint` must report *both* `f_00` and `f_01`, since seq3 is genuinely
+    downstream of both.
+    """
+    events = [
+        _fault_event(EventType.FAULT_INJECTED, seq=0, fault_id="f_00", causal_parents=[]),
+        make_event(EventType.TOOL_CALL, seq=1, causal_parents=[0]),
+        _fault_event(EventType.FAULT_INJECTED, seq=2, fault_id="f_01", causal_parents=[]),
+        make_event(EventType.STATE_WRITE, seq=3, causal_parents=[1, 2]),
+    ]
+    earliest = compute_causal_taint(events)  # type: ignore[arg-type]
+    full = compute_full_taint(events)  # type: ignore[arg-type]
+    assert earliest[3] == "f_00"  # unchanged — this function's own contract is untouched
+    assert full[3] == frozenset({"f_00", "f_01"})  # both contributed, per PRD §9.4
+
+
+def test_compute_full_taint_propagates_the_union_transitively() -> None:
+    """A third event downstream of the already-merged seq3 inherits both fault_ids too."""
+    events = [
+        _fault_event(EventType.FAULT_INJECTED, seq=0, fault_id="f_00", causal_parents=[]),
+        make_event(EventType.TOOL_CALL, seq=1, causal_parents=[0]),
+        _fault_event(EventType.FAULT_INJECTED, seq=2, fault_id="f_01", causal_parents=[]),
+        make_event(EventType.STATE_WRITE, seq=3, causal_parents=[1, 2]),
+        make_event(EventType.STATE_WRITE, seq=4, causal_parents=[3], agent_id="reviewer"),
+    ]
+    full = compute_full_taint(events)  # type: ignore[arg-type]
+    assert full[4] == frozenset({"f_00", "f_01"})
+
+
+def test_compute_full_taint_returns_empty_mapping_for_an_untainted_log() -> None:
+    events = [make_event(EventType.STATE_WRITE, seq=0, causal_parents=[], agent_id="planner")]
+    assert compute_full_taint(events) == {}
 
 
 # ---------------------------------------------------------------------------------------

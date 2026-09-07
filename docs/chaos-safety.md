@@ -156,17 +156,25 @@ interception point for an `llm_call`, a retry span, or a write-batch, the same g
 [Interception point mapping](#interception-point-mapping) already describes for
 `latency`/`message_drop`/`tool_failure`.
 
-A second, smaller gap: `runtime.scheduler.RunState.ABORTED_GUARD` exists as a legal transition
-target from `RUNNING`, but nothing in the fixed scheduler actually transitions to it —
-`AbortGuardTripped` propagates through `Scheduler.run()`'s existing `except BaseException`
-handler, which moves the run to `FAILED` instead. NFR-13 ("analysable partial log") still holds
-— every event up to the trip was already written and flushed — but the terminal `RunState`
-value is not PRD-exact. Reaching `ABORTED_GUARD` specifically would need a second, dedicated
-`scheduler.py` touch (a public abort method, or a hook return value the scheduler interprets)
-beyond the two narrow, justified touches this build already makes (see
-[The scheduler.py deviation](#the-scheduler-py-deviation) and
-[Declared vs. linear-fallback causal parents](#declared-vs-linear-fallback-causal-parents)) —
-judged out of scope and recorded here rather than guessed at with a third unreviewed change.
+**Update, op2-audit-p09-second.md finding #5 (2026-09-07):** the gap this subsection used to
+describe — `RunState.ABORTED_GUARD` existing as a legal transition target nothing actually
+reached, `AbortGuardTripped` instead falling through to the generic `except BaseException`
+handler and landing in `FAILED` — is closed. `Scheduler.run()` now has a dedicated
+`except AbortGuardTripped:` branch, ordered before the generic handler, that transitions to
+`RunState.ABORTED_GUARD` and re-raises. `tests/integration/faults/test_safety_suite.py::
+test_a_tripped_abort_guard_stops_the_run_and_the_partial_log_survives` asserts
+`scheduler.state == RunState.ABORTED_GUARD` directly against a real `Scheduler` run. This is a
+third, narrow, justified `scheduler.py` touch beyond the two [The scheduler.py
+deviation](#the-scheduler-py-deviation) and [Declared vs. linear-fallback causal
+parents](#declared-vs-linear-fallback-causal-parents) already describe — see
+`op3-repair-report-p09-second.md` finding #5 for the full repair and verification record.
+
+**Still open:** only the state transition itself was fixed. PRD §13.6's other two clauses for a
+guard trip — the fault injector disarming itself, and in-flight tasks being cancelled rather than
+left to whatever the scheduler was already doing — are unchanged by this fix and remain
+unimplemented, disclosed rather than silently folded in (see `safety.AbortGuardTripped`'s own
+docstring). The four never-live-wired guards (`max_tokens`/`max_llm_calls`/`max_retries`/
+`max_events`, previous paragraph) are also unaffected by this fix.
 
 ### Malformed guard
 
@@ -322,8 +330,9 @@ that required format:
    `Scheduler` harness, the same precedent gate G3 (P06) set.
 2. `latency`/`message_drop`/`tool_failure` have no live production interception point — see
    [Interception point mapping](#interception-point-mapping).
-3. `ABORTED_GUARD` is a legal `RunState` nothing transitions to — see
-   [Abort guard wiring](#abort-guard-wiring).
+3. ~~`ABORTED_GUARD` is a legal `RunState` nothing transitions to~~ — **closed 2026-09-07**,
+   op2-audit-p09-second.md finding #5; see [Abort guard wiring](#abort-guard-wiring). The
+   injector-disarm/task-cancellation half of the same PRD §13.6 clause remains open.
 4. Rule 3 (ambient agent-context taint) has no fault-class module in this build that gives it an
    observable end-to-end effect — see [Restart and rule 3](#restart-and-rule-3).
 5. `taint.compute_causal_taint` (offline) cannot distinguish declared from linear-fallback
