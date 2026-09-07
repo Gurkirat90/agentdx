@@ -292,7 +292,7 @@ def get_exploration(
     """
     _require_run(store, run_id)
     raise NotYetAvailableError(
-        "E-EXPL-001",
+        "E-EXPLORE-001",
         f"Exploration results for run {run_id} are not available: no analysis pipeline in "
         f"this build persists a bounded-exploration report, and api/ may not import "
         f"agentdx.explore directly (CONTEXT.md §4 layer contract). Bounded search: absence "

@@ -15,11 +15,11 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from agentdx import wall_time
 from agentdx.events.schema import Event
 from agentdx.explore.dedup import SeenSchedules
 from agentdx.explore.reduce import interesting_steps
 from agentdx.explore.schedule import DelaySchedule, Turn, turns_from_events
+from agentdx.runtime.clock import wall_time
 
 
 @runtime_checkable

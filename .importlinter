@@ -110,14 +110,25 @@ forbidden_modules =
     fastapi
 
 ; --- explore/ --------------------------------------------------------------------------
-; "May import: runtime, analysis.race. Must not import: —." The table lists no restriction,
-; so only the universal one is encoded: nothing above the transport layer is imported.
+; "May import: runtime, analysis.race." Corrected 2026-09-07 (op2-audit-p13.md finding #6):
+; this contract previously forbade only api/cli — the universal "nothing above the transport
+; layer" rule — leaving store/sdk/scenario/otel unforbidden even though CONTEXT.md §4's table
+; names only runtime/analysis.race as permitted. explore/'s own real imports are exactly
+; agentdx.events.schema, agentdx.analysis.race and agentdx.explore.* (verified live by this
+; audit — no store/sdk/scenario/otel import exists today), so this tightening is currently a
+; no-op in practice; it exists to make a *future* drift into one of those layers a real CI
+; failure instead of a silent gap, matching scenario-is-declarative's already-exhaustive
+; pattern below.
 [importlinter:contract:explore-below-transport]
 name = explore/ stays below the transport layer
 type = forbidden
 source_modules =
     agentdx.explore
 forbidden_modules =
+    agentdx.store
+    agentdx.sdk
+    agentdx.scenario
+    agentdx.otel
     agentdx.api
     agentdx.cli
 

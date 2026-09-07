@@ -202,7 +202,7 @@ def test_get_exploration_always_409_in_this_build(
     response = client.get(f"/api/runs/{run_id}/exploration")
     assert response.status_code == 409
     body = response.json()
-    assert body["error"]["code"] == "E-EXPL-001"
+    assert body["error"]["code"] == "E-EXPLORE-001"
     # I10 (CONTEXT.md §2) requires this exact sentence verbatim — a loose substring check
     # ("coverage" or "bounded") has no discriminating power against a rephrase that drops it
     # while keeping either word (OP-2 audit, op2-audit-p14.md finding #3, demonstrated live: a

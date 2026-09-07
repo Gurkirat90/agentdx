@@ -239,8 +239,40 @@ concrete number for a concrete shape, not a claimed constant.
    an actual CLI command or HTTP endpoint is a later prompt's job.
 5. **No new detector, no UI.** `explore/` reuses `analysis.race.detect_conflicts` verbatim (see
    above) and renders nothing beyond `format_report`'s plain text.
-6. **No OP-2 audit yet.** This build is self-reported passing (all example counts above were run
-   directly, not asserted) but has not been independently re-verified — see `CONTEXT.md`.
+6. **First OP-2 audit complete (2026-09-07), verdict PASS WITH NOTES — a second, independent
+   re-audit is still owed**, same standing pattern as every module in this project. No
+   functional defect was found in this module's own shipped code; see `CONTEXT.md` §9 D-88 and
+   §13 for the full account, and this file's own "Error codes" section below (added by that
+   audit's own finding #1).
+
+## Error codes
+
+<a id="e-expl-000"></a>
+### `E-EXPL-000` — base class, never directly raised
+
+`explore.schedule.ExploreError`'s own default code. Every real error `explore/` raises
+constructs a subclass with its own fixed code instead (see `E-EXPL-001` below); this code
+exists only as the base class's declared default and should never appear in a live error
+message. If it ever does, that is itself a bug — a call site is raising `ExploreError`
+directly instead of a named subclass.
+
+<a id="e-expl-001"></a>
+### `E-EXPL-001` — malformed run: no usable `schedule_decision` structure
+
+Raised by `explore.schedule.MalformedRunError` (`turns_from_events`) when a run's event log
+either contains zero `schedule_decision` events (nothing to branch on — the log likely comes
+from a non-scheduler-backed execution, PRD §15.3's precondition) or contains two
+`schedule_decision` events that claim the same `sched_step` with a different
+`chosen_task_id` (the log is not from one coherent, replayable run). **Fix:** re-run the
+target through the real `Scheduler` (`runtime.scheduler.Scheduler`) rather than handing
+`explore()` a hand-assembled or corrupted event log.
+
+Not to be confused with `api/routes/analysis.py`'s unrelated `E-EXPLORE-001` (a 409 "no
+bounded-exploration report is persisted for this run yet" stub on `GET
+/api/runs/{id}/exploration`) — the two originally collided on the identical string
+`E-EXPL-001` until op2-audit-p13.md finding #3 caught it; the API route's code was renamed to
+avoid the collision, this module's own code was left unchanged since it is the one the string
+`E-EXPL-NNN` (this module's own prefix) actually belongs to.
 
 ## Worked reference: reading a `Report`
 
