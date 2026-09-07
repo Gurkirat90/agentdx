@@ -171,11 +171,16 @@ export function TimelinePanel(): React.JSX.Element {
           break;
         case 'Home':
           e.preventDefault();
-          if (ticks[0] !== undefined) seek(ticks[0]);
+          // True run bounds (op2-audit-p16.md finding #4), not the first/last *event tick* —
+          // a run's first/last span boundary can start well after 0ms or end well before the
+          // makespan (measured against real fixture data: up to 42% short on `support_triage`),
+          // so `Home`/`End` must jump to `0`/`makespan` directly. `seek` itself clamps and
+          // no-ops while `makespan` is still `null`, so this is safe before the waterfall loads.
+          seek(0);
           break;
         case 'End':
           e.preventDefault();
-          if (ticks.length > 0) seek(ticks[ticks.length - 1]!);
+          if (makespan !== null) seek(makespan);
           break;
         default:
           break;
@@ -183,7 +188,7 @@ export function TimelinePanel(): React.JSX.Element {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [stepEvents, jumpFinding, setPlaying, playing, ticks, seek]);
+  }, [stepEvents, jumpFinding, setPlaying, playing, ticks, seek, makespan]);
 
   if (waterfall === null || makespan === null) {
     return (
@@ -198,7 +203,7 @@ export function TimelinePanel(): React.JSX.Element {
       <div className={styles.header}>
         <h1 className={styles.title}>Timeline</h1>
         <div className={styles.transport}>
-          <button type="button" className={styles.transportButton} onClick={() => ticks[0] !== undefined && seek(ticks[0])}>
+          <button type="button" className={styles.transportButton} onClick={() => seek(0)}>
             ⏮ home
           </button>
           <button
@@ -212,7 +217,7 @@ export function TimelinePanel(): React.JSX.Element {
           <button
             type="button"
             className={styles.transportButton}
-            onClick={() => ticks.length > 0 && ticks[ticks.length - 1] !== undefined && seek(ticks[ticks.length - 1]!)}
+            onClick={() => makespan !== null && seek(makespan)}
           >
             end ⏭
           </button>

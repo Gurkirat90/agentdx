@@ -5,6 +5,13 @@
  * ramp steps — never a literal hex (AGENTS.md §4): every step is a CSS custom property name,
  * resolved by the component's stylesheet, matching `waterfallBuckets.ts`'s established
  * pattern of a pure `data -> token name` function with no colour value inside it.
+ *
+ * Ruling (PRD-silent point, **C-35**): the PRD names the six ramp steps but no formula for
+ * how a set of edges' own latencies maps onto them — no absolute millisecond thresholds are
+ * named anywhere. `heatStepsForEdges` below buckets by rank (quantile) among the run's own
+ * edges, not fixed thresholds — the same relative-scale treatment `waterfallBuckets.ts`/C-30
+ * already established for a different panel; "fast"/"slow" are meaningful only relative to
+ * what this run actually produced.
  */
 import type { GraphEdge } from '../store/types';
 

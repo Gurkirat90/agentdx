@@ -213,3 +213,58 @@ describe('eventsSlice terminal status → live run re-fetch (PRD §26.2/§28.4 s
     expect(useControlTowerStore.getState().runStatus_ws).toBe('running');
   });
 });
+
+describe('eventsSlice degrade-to-polling — unguarded openapi-fetch result (op2-audit-p16.md finding #1)', () => {
+  /** Drives the module through PRD §26.2's degrade-to-polling path. `scheduleReconnect` reads
+   * `wsReconnectAttempt` *before* incrementing it, so it takes MAX_RECONNECT_ATTEMPTS + 1 (7)
+   * closes to reach the ceiling: the first 6 each schedule one more reconnect (raising the
+   * counter to 6), and the 7th finds `attempt(6) >= MAX(6)` already true and calls
+   * `startPolling` synchronously instead of opening another socket. 10s per reconnect step
+   * safely covers the real backoff's worst case (8000ms base * 1.2 jitter = 9600ms); the final
+   * close needs no timer advance since `startPolling` runs synchronously inside it. */
+  async function driveToPolling(): Promise<void> {
+    useControlTowerStore.getState().connectWs('r_1');
+    MockWebSocket.instances.at(-1)!.simulateOpen();
+    for (let i = 0; i < 6; i++) {
+      MockWebSocket.instances.at(-1)!.close();
+      await vi.advanceTimersByTimeAsync(10000);
+    }
+    MockWebSocket.instances.at(-1)!.close();
+    expect(useControlTowerStore.getState().wsStatus).toBe('polling');
+  }
+
+  it('a malformed poll response (data undefined, no error — the documented dev-proxy-500 shape) does not become an unhandled promise rejection', async () => {
+    vi.useFakeTimers();
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onRejection);
+    try {
+      mockGET.mockImplementation(() => Promise.resolve({ data: undefined, error: undefined }));
+      await driveToPolling();
+
+      // One poll tick: before this fix, `result.data.events` threw inside the bare
+      // `void (async () => {...})()` with no `.catch()`, an unhandled rejection every
+      // POLL_INTERVAL_MS for as long as the malformed response recurred.
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(rejections).toHaveLength(0);
+      expect(useControlTowerStore.getState().liveEvents).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
+  it('a well-formed poll response still applies its events normally once polling', async () => {
+    vi.useFakeTimers();
+    mockGET.mockImplementation(() =>
+      Promise.resolve({ data: { events: [makeEvent(1), makeEvent(2)] } }),
+    );
+    await driveToPolling();
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const state = useControlTowerStore.getState();
+    expect(state.liveEvents).toHaveLength(2);
+    expect(state.maxSeqSeen).toBe(2);
+  });
+});

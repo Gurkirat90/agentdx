@@ -61,7 +61,15 @@ export const createTimelineSlice: StateCreator<TimelineSlice, [], [], TimelineSl
     // A later call may have started (and finished) after this one while it was in flight —
     // never let a slower, stale response overwrite a newer scrub position's result.
     if (get().virtualTs !== virtualTs) return;
-    if (result.error) {
+    // `result.error` alone is not a reliable success guard: `openapi-fetch` can come back with
+    // neither `error` nor `data` set (e.g. a non-JSON error body — a dev-proxy 500 page when the
+    // backend is unreachable — fails the client's JSON parse silently rather than populating
+    // `error`). Trusting `!result.error` alone here previously let `stateAt` become `undefined`
+    // while `stateAtStatus` was set to `'loaded'`, bypassing `Timeline.tsx`'s own `stateAt ===
+    // null` guard (`undefined !== null`) and crashing on `stateAt.at_virtual_ts` instead of
+    // showing the intended error state (op2-audit-p16.md finding #1; same defect class D-60
+    // already fixed in `graphSlice`/`findingsSlice`/`chaosSlice`, missed here).
+    if (result.error || result.data === undefined) {
       set({ stateAtStatus: 'error', stateAtError: 'State reconstruction failed.' });
       return;
     }

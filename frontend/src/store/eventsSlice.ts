@@ -174,7 +174,17 @@ export const createEventsSlice: StateCreator<
         const result = await api.GET('/api/runs/{run_id}/events', {
           params: { path: { run_id: runId }, query: { from_seq: fromSeq, limit: 1000 } },
         });
-        if (result.error || runtime.torn) return;
+        if (runtime.torn) return;
+        // `result.error` alone is not a reliable success guard: `openapi-fetch` can come back
+        // with neither `error` nor `data` set (a non-JSON error body, e.g. a dev-proxy 500 page
+        // when the backend is unreachable). Before this fix, that shape reached
+        // `result.data.events` unguarded — a `TypeError` thrown inside this bare `void
+        // (async () => {...})()`, with no `.catch()`, inside a `setInterval` callback: an
+        // unhandled promise rejection outside React's render cycle, invisible to
+        // `PanelErrorBoundary` (which only catches render-time exceptions), repeating silently
+        // every `POLL_INTERVAL_MS` for as long as the malformed response kept recurring
+        // (op2-audit-p16.md finding #1; same defect class D-60 already fixed elsewhere).
+        if (result.error || result.data === undefined) return;
         for (const event of result.data.events) applyEvent(event as unknown as LiveEvent);
       })();
     }, POLL_INTERVAL_MS);
