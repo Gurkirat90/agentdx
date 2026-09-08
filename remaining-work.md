@@ -8,13 +8,13 @@ now repaired; G10/D-86/D-87 owner decisions made (all: leave as recommended); D-
 (`CliRunHost` bypass); D-92 row 7 re-scoped (bigger than first thought, correctly flagged rather
 than built). None of this is live-verified in this sandbox — see each item's own note.
 
-**10/10 gates PASS, real, in one `just acceptance` run — first time ever.** G1-G9 all real
-subprocess passes; G10 clean at last after three real bugs found and fixed today (a discarded
-teardown exit code, a poll loop that could silently skip its own check, and an outer timeout
-tighter than the harness's own accepted worst case). This is the single biggest milestone in
-the project's acceptance-gate history — but it's a local run, not yet CI-confirmed, and gate-green
-is not the same as module-`VERIFIED` (§0's own bar). Section 2 below (the re-audit backlog) and
-section 3 (release mechanics) are still real, independent of this.
+**10/10 gates PASS happened once, real, in one `just acceptance` run — a real milestone, not
+G10's steady state.** G1-G9 are solid, real subprocess passes. G10 is genuinely intermittent:
+10 attempts today, 2 clean, 8 failures (see §1b for the full account) — most of the failures are
+registry/network-fetch variance on a genuinely cold build, not a defect this harness can fix;
+two were a real Docker daemon race that's now been root-caused and fixed (unverified). Gate-green
+is not the same as module-`VERIFIED` (§0's own bar) either way. Section 2 below (the re-audit
+backlog) and section 3 (release mechanics) are still real, independent of this.
 
 ## 1. G3 / G5 — independently audited 2026-09-08 (`op2-audit-g3-g5.md`)
 
@@ -148,6 +148,26 @@ strain from repeated full daemon-wide cache wipes (`docker builder prune -af` ea
 code regression (nothing changed between attempts 6 and 7). **Recommendation: stop running G10
 today.** Restart Docker Desktop or take a break before trusting the next measurement — the two
 genuinely clean early results (67.3s, 27.1s) are the more representative numbers right now.
+
+**This "VM fatigue" theory was then tested directly and retracted.** The owner did a full
+quit-and-reopen of Docker Desktop and re-ran cold: **225.003s, still over threshold** (attempt
+9). A real restart not fixing it rules out simple fatigue. Two more attempts followed (10 total
+today): attempt 10 hit `compose_up` failing with `container is marked for removal and cannot be
+started`, and an immediate re-run hit the classic naming-conflict symptom again — **despite**
+`_teardown_ok()`/`_force_teardown()` already being in place. Root-caused for real this time:
+Docker removes containers/networks *asynchronously*, and a single point-in-time check can report
+"clean" before the daemon has actually finished. **Fixed:** `_teardown_settled()` (poll with
+retry/backoff instead of checking once), wired into both `_go_cold()` and the exit-cleanup path.
+Not live-verified.
+
+**Honest final tally, 10 attempts: 2 clean (67.3s, 27.1s), 8 failures** — 1 unexplained exit-1,
+1 outer-timeout/orphaned-container (fixed), 2 async-removal-race naming conflicts (fixed just
+now, unverified), 4 slow-builds-over-threshold (215.5s, 494.4s, 201.4s, 225.0s — most likely
+registry/network-fetch variance on a genuinely cold build, a variance class this harness's own
+docstring already documented *before* today; not fixable by this harness, since re-fetching ~79
+Python packages + npm deps fresh is what "cold" means here). **Owner's call: stop chasing a
+green run today, commit the honest record.** G10 is not in `release.yml`'s blocking gate set
+(already decided, D-93), so none of this blocks the actual release.
 
 ## 2. Standing re-audit backlog
 

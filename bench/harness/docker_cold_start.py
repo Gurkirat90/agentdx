@@ -283,6 +283,32 @@ def _teardown_ok() -> bool:
     return network.returncode != 0  # non-zero means "no such network" -- gone, as wanted
 
 
+def _teardown_settled(*, retries: int = 5, delay_s: float = 2.0) -> bool:
+    """Poll `_teardown_ok()` instead of checking it exactly once.
+
+    **Root cause, 2026-09-08 (CONTEXT.md D-94 addendum), found live during a run of repeated
+    same-day attempts.** A single `_teardown_ok()` check reads `docker compose ps -aq` and
+    `docker network inspect` at one instant -- but Docker's own container/network removal is
+    asynchronous at the daemon level: `docker rm -f`/`compose down` can return, and a container
+    can even stop appearing in `ps -a`, before the underlying resource is actually released.
+    Observed exactly this: two consecutive invocations, seconds apart, both hit `docker compose
+    up -d --build` failing with `Error response from daemon: container is marked for removal
+    and cannot be started` / `Conflict. The container name ... is already in use` -- immediately
+    downstream of a `_teardown_ok()` that had itself already reported clean moments earlier. A
+    single check cannot distinguish "actually gone" from "the daemon is still finishing." This
+    polls with a short backoff instead, giving the daemon room to settle before `_go_cold`
+    proceeds to `docker compose up`. Unverified against a real daemon by this fix itself (no
+    Docker available while writing it) -- the mechanism is real and observed, the fix's own
+    effectiveness needs a live re-run to confirm.
+    """
+    for attempt in range(retries):
+        if _teardown_ok():
+            return True
+        if attempt < retries - 1:
+            time.sleep(delay_s)
+    return False
+
+
 def _force_teardown() -> None:
     """Belt-and-suspenders cleanup for when `docker compose down` alone did not fully work.
 
@@ -345,9 +371,9 @@ def _go_cold(*, pull_cold: bool = False) -> None:
     never be cited as the gate.
     """
     _compose("down", "-v", "--rmi", "local", "--remove-orphans")
-    if not _teardown_ok():
+    if not _teardown_settled():
         _force_teardown()
-        if not _teardown_ok():
+        if not _teardown_settled():
             raise CannotMeasure(
                 "the compose project's containers or its default network survived teardown "
                 f"even after a forced cleanup. Run `docker compose -p {COMPOSE_PROJECT} down "
@@ -745,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         # written; a leftover state at this point is the *next* run's `_go_cold` problem to
         # catch and report, not this one's to fail on.
         _compose("down", "-v", "--remove-orphans")
-        if not _teardown_ok():
+        if not _teardown_settled():
             _force_teardown()
 
     return 0 if outcome.met else EXIT_NOT_MET
