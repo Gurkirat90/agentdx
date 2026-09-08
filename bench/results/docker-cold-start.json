@@ -8,7 +8,7 @@
   "benchmark": "docker-cold-start",
   "cold_cache": true,
   "criterion": "PRD \u00a744.1 G10: `docker compose up` reaches a healthy /api/health AND a populated run list, cold cache, arm64, under the threshold.",
-  "detail": "`docker compose up -d --build` alone took 494.43s, already over the 180.0s threshold, before /api/health was polled even once -- the one check this harness still performed after the fact found it not yet answering either. This is a slow build, not a hung or unhealthy server; `build_and_up_wall_s` in the result file is the number that explains this failure, not this step.",
+  "detail": "`docker compose up -d --build` alone took 232.466s, already over the 180.0s threshold, before /api/health was polled even once -- the one check this harness still performed after the fact found it not yet answering either. This is a slow build, not a hung or unhealthy server; `build_and_up_wall_s` in the result file is the number that explains this failure, not this step.",
   "environment": {
     "arch_conformant": true,
     "implementation": "CPython",
@@ -42,7 +42,7 @@
   "seed_exit_code": 0,
   "threshold_s": 180.0,
   "timings_wall_s": {
-    "build_and_up_wall_s": 494.43,
+    "build_and_up_wall_s": 232.466,
     "healthy_at_wall_s": null,
     "populated_at_wall_s": null
   }

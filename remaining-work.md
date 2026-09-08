@@ -160,13 +160,15 @@ Docker removes containers/networks *asynchronously*, and a single point-in-time 
 retry/backoff instead of checking once), wired into both `_go_cold()` and the exit-cleanup path.
 Not live-verified.
 
-**Honest final tally, 10 attempts: 2 clean (67.3s, 27.1s), 8 failures** — 1 unexplained exit-1,
-1 outer-timeout/orphaned-container (fixed), 2 async-removal-race naming conflicts (fixed just
-now, unverified), 4 slow-builds-over-threshold (215.5s, 494.4s, 201.4s, 225.0s — most likely
+**Honest final tally, 11 attempts: 2 clean (67.3s, 27.1s), 9 failures** — 1 unexplained exit-1,
+1 outer-timeout/orphaned-container (fixed), 2 async-removal-race naming conflicts (fixed,
+unverified), 5 slow-builds-over-threshold (215.5s, 494.4s, 201.4s, 225.0s, 232.5s — most likely
 registry/network-fetch variance on a genuinely cold build, a variance class this harness's own
 docstring already documented *before* today; not fixable by this harness, since re-fetching ~79
-Python packages + npm deps fresh is what "cold" means here). **Owner's call: stop chasing a
-green run today, commit the honest record.** G10 is not in `release.yml`'s blocking gate set
+Python packages + npm deps fresh is what "cold" means here). The 11th attempt reconfirmed the
+network-variance pattern rather than testing the daemon-race fix (different failure mode).
+**Owner's final call: accept this as G10's honestly measured behavior, commit the record, move
+on.** The 180s threshold was not touched. G10 is not in `release.yml`'s blocking gate set
 (already decided, D-93), so none of this blocks the actual release.
 
 ## 2. Standing re-audit backlog
