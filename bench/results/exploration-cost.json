@@ -1,0 +1,140 @@
+{
+  "benchmark": "exploration-cost",
+  "environment": {
+    "implementation": "CPython",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "python": "3.10.12",
+    "system": "Linux"
+  },
+  "function_under_test": "agentdx.explore.generate.explore",
+  "k_values": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "met": true,
+  "method": "explore(executor, delay_bound_k=k, schedule_cap_n=500, time_budget_s=30.0) run once per (scenario, k) pair; agentdx.analysis.race.detect_conflicts run against every executed schedule's own event log to determine finding presence. Wall time measured with time.perf_counter() around each explore() call.",
+  "requirement": "PRD \u00a734.4",
+  "requirement_text": "Method: for each fixture, run exploration at k in {0,1,2,3} and record: schedules executed, schedules reduced away, wall time, and the smallest k at which each seeded defect is first found. Published as: a table showing where each defect is found.",
+  "scenarios": [
+    {
+      "defect_expected": true,
+      "met": true,
+      "note": "defect expected and found (smallest k=0)",
+      "rows": [
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 0,
+          "finding_present": true,
+          "k": 0,
+          "pruned_by_reduction": 0,
+          "schedules_executed": 1,
+          "schedules_reduced_away": 0,
+          "unique_signatures": 1,
+          "wall_time_s": 0.008109
+        },
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 0,
+          "finding_present": true,
+          "k": 1,
+          "pruned_by_reduction": 3,
+          "schedules_executed": 3,
+          "schedules_reduced_away": 3,
+          "unique_signatures": 3,
+          "wall_time_s": 0.002424
+        },
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 3,
+          "finding_present": true,
+          "k": 2,
+          "pruned_by_reduction": 3,
+          "schedules_executed": 6,
+          "schedules_reduced_away": 6,
+          "unique_signatures": 6,
+          "wall_time_s": 0.004907
+        },
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 11,
+          "finding_present": true,
+          "k": 3,
+          "pruned_by_reduction": 3,
+          "schedules_executed": 7,
+          "schedules_reduced_away": 14,
+          "unique_signatures": 7,
+          "wall_time_s": 0.006387
+        }
+      ],
+      "scenario_id": "code_pipeline_shaped",
+      "smallest_k_found": 0
+    },
+    {
+      "defect_expected": false,
+      "met": true,
+      "note": "no defect expected, and none found at any swept k (correctly proving G2 \u2014 the declared reducer suppresses the finding at every k)",
+      "rows": [
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 0,
+          "finding_present": false,
+          "k": 0,
+          "pruned_by_reduction": 0,
+          "schedules_executed": 1,
+          "schedules_reduced_away": 0,
+          "unique_signatures": 1,
+          "wall_time_s": 0.001111
+        },
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 0,
+          "finding_present": false,
+          "k": 1,
+          "pruned_by_reduction": 9,
+          "schedules_executed": 5,
+          "schedules_reduced_away": 9,
+          "unique_signatures": 5,
+          "wall_time_s": 0.005019
+        },
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 12,
+          "finding_present": false,
+          "k": 2,
+          "pruned_by_reduction": 43,
+          "schedules_executed": 13,
+          "schedules_reduced_away": 55,
+          "unique_signatures": 13,
+          "wall_time_s": 0.013352
+        },
+        {
+          "budget_exceeded": false,
+          "capped": false,
+          "duplicate_children": 60,
+          "finding_present": false,
+          "k": 3,
+          "pruned_by_reduction": 127,
+          "schedules_executed": 37,
+          "schedules_reduced_away": 187,
+          "unique_signatures": 37,
+          "wall_time_s": 0.037032
+        }
+      ],
+      "scenario_id": "research_fanout_shaped",
+      "smallest_k_found": null
+    }
+  ],
+  "schedule_cap_n": 500,
+  "scope_note": "Runs against tests.integration.explore._harness's two synthetic, Scheduler-driven scenarios (research_fanout-shaped, code_pipeline-shaped), not the three real fixture graphs directly \u2014 see this module's own docstring and D-55/D-88 (CONTEXT.md \u00a79) for why. support_triage has no synthetic explore-shaped scenario built (P13 built exactly two), so it is absent here, disclosed rather than silently generalized.",
+  "time_budget_s": 30.0
+}

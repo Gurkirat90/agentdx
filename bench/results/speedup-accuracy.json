@@ -1,0 +1,213 @@
+{
+  "analytic_fixtures": {
+    "count": 4,
+    "met": true,
+    "rows": [
+      {
+        "achieved_speedup_met": true,
+        "derivation": "critical_path=START->T1(50)->T2(50)->END=100; total_work=50+50=100; ideal=100/100=1.0; baseline=100 -> achieved=100/100=1.0",
+        "expected_achieved_speedup": 1.0,
+        "expected_ideal_parallel_speedup": 1.0,
+        "fixture_id": "sequential_no_parallelism",
+        "ideal_parallel_speedup_met": true,
+        "measured_achieved_speedup": 1.0,
+        "measured_ideal_parallel_speedup": 1.0,
+        "met": true
+      },
+      {
+        "achieved_speedup_met": true,
+        "derivation": "critical_path=max(100,100)=100; total_work=100+100=200; ideal=200/100=2.0; baseline=200 -> achieved=200/100=2.0",
+        "expected_achieved_speedup": 2.0,
+        "expected_ideal_parallel_speedup": 2.0,
+        "fixture_id": "two_way_parallel",
+        "ideal_parallel_speedup_met": true,
+        "measured_achieved_speedup": 2.0,
+        "measured_ideal_parallel_speedup": 2.0,
+        "met": true
+      },
+      {
+        "achieved_speedup_met": true,
+        "derivation": "critical_path=max(33,37,41)=41; total_work=33+37+41=111; ideal=111/41",
+        "expected_achieved_speedup": 2.707317073170732,
+        "expected_ideal_parallel_speedup": 2.707317073170732,
+        "fixture_id": "three_way_uneven_parallel",
+        "ideal_parallel_speedup_met": true,
+        "measured_achieved_speedup": 2.707317073170732,
+        "measured_ideal_parallel_speedup": 2.707317073170732,
+        "met": true
+      },
+      {
+        "achieved_speedup_met": true,
+        "derivation": "critical_path=START->A1(20)->message(5)->B1(15)->END=40; total_work=20+15=35; ideal=35/40=0.875; baseline fixed at 42 (independent) -> achieved=42/40=1.05",
+        "expected_achieved_speedup": 1.05,
+        "expected_ideal_parallel_speedup": 0.875,
+        "fixture_id": "chain_with_handoff_gap",
+        "ideal_parallel_speedup_met": true,
+        "measured_achieved_speedup": 1.05,
+        "measured_ideal_parallel_speedup": 0.875,
+        "met": true
+      }
+    ]
+  },
+  "benchmark": "speedup-accuracy",
+  "environment": {
+    "implementation": "CPython",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "python": "3.10.12",
+    "system": "Linux"
+  },
+  "function_under_test": "agentdx.analysis.baseline.compare(multi_events, baseline)",
+  "met": true,
+  "method": "Analytic half: four hand-authored event logs (tests.analysis._events builders), each with an in-file critical-path/total-work derivation verified against the real timing.build_timing_dag/critical_path/parallelism_metrics functions before being trusted; analysis.baseline.compare's two speedup numbers are checked against the hand-derived value to within \u00b11%. Calibration half: bench.harness._real_fixture_run.run_fixture_fresh (real Scheduler/CliRunHost) executes each real fixture 5 times (seeds 42-46); divergence = (wall_makespan_ms - virtual_makespan_ms) / virtual_makespan_ms per run.",
+  "requirement": "PRD \u00a734.5",
+  "requirement_text": "Method: (1) Analytic fixtures. Synthetic graphs with known durations where the correct speedup is derivable by hand; assert the computed value matches to \u00b11%. (2) Virtual-versus-wall calibration. For a live-recorded run, compare virtual makespan to measured wall makespan; report the divergence distribution. Published as: 'computed speedup matches the analytic value within X% on N synthetic graphs; virtual/wall divergence median Y%.'",
+  "tolerance": 0.01,
+  "virtual_wall_calibration": {
+    "note": "No PRD gate on this half (descriptive only). Live finding, this run: all three real fixtures report virtual_makespan_ms == 0 for every sample \u2014 runtime.scheduler.Scheduler only advances its virtual clock inside its 'nothing runnable, a timer is pending' branch (the sole self._clock.advance_to(...) call site), and none of these fixtures ever registers a timer (no agentdx.sleep(), no injected fault latency, no calibration profile \u2014 the still-open Q-43.2.3 gap). Divergence is therefore NOT MEASURABLE for any of the three today, not '0.0' \u2014 see each row's own not_measurable_reason. This is a genuine, newly-observed gap in these fixtures' realism, disclosed rather than papered over with a flattering-looking zero; not previously documented in CONTEXT.md.",
+    "rows": [
+      {
+        "divergence_max": null,
+        "divergence_median": null,
+        "divergence_min": null,
+        "fixture": "code_pipeline",
+        "measurable_sample_count": 0,
+        "not_measurable_reason": "virtual_makespan_ms was 0 in every sample \u2014 this fixture's real Scheduler-driven execution never advances the virtual clock (no timer/sleep/injected-latency call site was ever hit), so wall/virtual divergence is undefined (0/0), not zero",
+        "samples": [
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 42,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 43,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 44,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 45,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 46,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          }
+        ]
+      },
+      {
+        "divergence_max": null,
+        "divergence_median": null,
+        "divergence_min": null,
+        "fixture": "support_triage",
+        "measurable_sample_count": 0,
+        "not_measurable_reason": "virtual_makespan_ms was 0 in every sample \u2014 this fixture's real Scheduler-driven execution never advances the virtual clock (no timer/sleep/injected-latency call site was ever hit), so wall/virtual divergence is undefined (0/0), not zero",
+        "samples": [
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 42,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 43,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 44,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 45,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 46,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          }
+        ]
+      },
+      {
+        "divergence_max": null,
+        "divergence_median": null,
+        "divergence_min": null,
+        "fixture": "research_fanout",
+        "measurable_sample_count": 0,
+        "not_measurable_reason": "virtual_makespan_ms was 0 in every sample \u2014 this fixture's real Scheduler-driven execution never advances the virtual clock (no timer/sleep/injected-latency call site was ever hit), so wall/virtual divergence is undefined (0/0), not zero",
+        "samples": [
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 42,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 43,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 44,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 45,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          },
+          {
+            "divergence": null,
+            "measurable": false,
+            "seed": 46,
+            "virtual_makespan_ms": 0,
+            "wall_makespan_ms": 0
+          }
+        ]
+      }
+    ],
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ]
+  }
+}

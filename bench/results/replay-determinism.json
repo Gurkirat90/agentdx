@@ -1,0 +1,54 @@
+{
+  "benchmark": "replay-determinism",
+  "environment": {
+    "implementation": "CPython",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "python": "3.10.12",
+    "system": "Linux"
+  },
+  "fixtures": [
+    {
+      "distinct_hash_count": 1,
+      "distinct_hashes": [
+        "blake2b:0dac4885f5729737cec45a4887bab4fd82a422721c1d7de4b3a113106a8b876b"
+      ],
+      "fixture": "code_pipeline",
+      "in_process_replays": 90,
+      "met": true,
+      "replays": 100,
+      "subprocess_replays": 10,
+      "the_hash": "blake2b:0dac4885f5729737cec45a4887bab4fd82a422721c1d7de4b3a113106a8b876b"
+    },
+    {
+      "distinct_hash_count": 1,
+      "distinct_hashes": [
+        "blake2b:4adec0b5911f90f677e16b21e9ebc7a777919ef1c365d4aaad72dd10641ca51f"
+      ],
+      "fixture": "support_triage",
+      "in_process_replays": 90,
+      "met": true,
+      "replays": 100,
+      "subprocess_replays": 10,
+      "the_hash": "blake2b:4adec0b5911f90f677e16b21e9ebc7a777919ef1c365d4aaad72dd10641ca51f"
+    },
+    {
+      "distinct_hash_count": 1,
+      "distinct_hashes": [
+        "blake2b:2b52e4278dcd32a58216bf036b3d9f443496d57b2ebc6be368641fc0b62ea1d6"
+      ],
+      "fixture": "research_fanout",
+      "in_process_replays": 90,
+      "met": true,
+      "replays": 100,
+      "subprocess_replays": 10,
+      "the_hash": "blake2b:2b52e4278dcd32a58216bf036b3d9f443496d57b2ebc6be368641fc0b62ea1d6"
+    }
+  ],
+  "function_under_test": "cli.commands.run._run_direct_target (the real production path 'agentdx run <fixture>' itself calls), via bench.harness._real_fixture_run.run_fixture_fresh",
+  "met": true,
+  "method": "For each real fixture, 90 in-process replays plus 10 fresh-OS-subprocess replays (100 total, >=10 in fresh processes per the PRD's own wording), each against an isolated, fresh data directory so run_id's D-80 cache-reuse path never turns a 'replay' into a cache hit. canonical_log_hash is computed per run; the published number is the count of distinct hashes across all 100.",
+  "requirement": "PRD \u00a734.2",
+  "requirement_text": "Method: 100 replays per fixture, >=10 in fresh processes; count distinct canonical log hashes. Gate: exactly 1 distinct hash per fixture. Published as: '100/100 identical' per fixture, with the hash.",
+  "seed": 42
+}
