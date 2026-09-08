@@ -7,19 +7,35 @@
 # ---------------------------------------------------------------------------------------
 # WHAT THIS IMAGE CANNOT DO TODAY — read before trusting it (AGENTS.md §2, §8)
 # ---------------------------------------------------------------------------------------
-# This file HAS been built and run, on Darwin/arm64, CPython 3.12.2, 2026-08-29 — later the
-# same session it was authored. The evidence is `bench/results/docker-cold-start.json` (real
-# container names, a real `E-SCHED-003` traceback from the `seed` service, `seed_exit_code: 5`)
-# and the `./.agentdx-data/` bind-mount contents the containers wrote through it. An earlier
-# revision of this header said the file had never been built; that was true when written and
-# went stale about half an hour later, which is why this note now carries a date and an
-# environment instead of a bare claim.
+# This file has been built and run for real, on Darwin/arm64. Current evidence:
+# `bench/results/docker-cold-start.json`, now a genuine COLD G10 pass (2026-09-08) —
+# `cold_cache: true`, `met: true`, `is_gate_conformant_run: true`: containers, volumes, the
+# locally built image, the whole builder cache and the `./.agentdx-data/` bind-mount were all
+# removed before the clock started; `docker compose up -d --build` then reached a healthy
+# `/api/health` AND a populated `/api/runs` (3 fixtures, `seed_exit_code: 0`) inside PRD §44.1
+# G10's 180s threshold. Per the file's own `gate_status` field, pass/fail is the durable claim,
+# not the exact wall-clock seconds (machine/registry-dependent) — read the file rather than
+# trusting a number quoted here.
 #
-# What that run does NOT establish: it was taken with `--no-prune` (`cold_cache: false` in the
-# result file), so it is a WARM measurement and is not a G10-conformant number. No cold build
-# has been timed. The image size against PRD §39.4's sub-500MB target has never been measured.
+# An earlier revision of this header cited this same file from a different, now-superseded
+# 2026-08-29 run (`seed_exit_code: 5`, a real `E-SCHED-003` traceback, `cold_cache: false`)
+# taken before gap 1 below was closed. That citation is stale now that the file holds the
+# 2026-09-08 cold pass instead — corrected here rather than left dangling, same reason this
+# note carries a date.
 #
-# Two of the three gaps below are now CLOSED (2026-09-07 update). One remains.
+# Image size (D-95, CONTEXT.md §9): measured 2026-09-08 via `docker images agentdx:local` —
+# **618MB**, 24% over PRD §39.4's <500MB target. Root cause investigated the same day: no
+# BuildKit cache mount is used here, and `uv sync` had no `--no-cache`, so uv's own
+# download/build cache for this 79-package lock (`duckdb`/`langgraph`'s tree included) was
+# being committed into the dependency-layer image layer alongside the venv itself, on top of
+# whatever the real dependency closure needs. Fixed below (`--no-cache` on both `uv sync`
+# calls) — **not yet re-measured**; the 618MB figure and this fix both predate/postdate each
+# other in the same session and no one has rebuilt+re-measured since. `UV_COMPILE_BYTECODE=1`
+# below was deliberately left alone rather than pulled for a further size win — it trades size
+# for moving Python's first-import compile cost from container startup (i.e., inside G10's own
+# `/api/health` timing) to build time, and this session has no way to test that tradeoff live.
+#
+# Two of the three gaps below are now CLOSED. One remains.
 #
 #   1. CLOSED 2026-09-03 (ADR-019, closing D-62 task #25). `Scheduler.begin_call`'s candidate-β
 #      fix means a fanned-out node body no longer deadlocks the single-task scheduler loop.
@@ -121,8 +137,17 @@ WORKDIR /app
 
 # Dependency layer: lockfile + manifest only, so application edits do not re-resolve.
 # `--no-install-project` installs the dependency closure without the project itself.
+#
+# `--no-cache` (D-95, CONTEXT.md §9, 2026-09-08): without it, uv's own download/build cache
+# (every wheel it fetches or builds for this 79-package lock, `duckdb`/`langgraph`'s tree
+# included) lands under the default cache dir and is committed into this layer along with the
+# venv itself — this build has no BuildKit cache mount, so nothing else ever reclaims it. Found
+# while investigating a real, measured 618MB image against PRD §39.4's <500MB target. Costs
+# rebuild speed (every build re-downloads instead of reusing a warm cache) in exchange for not
+# shipping a cache no running container ever reads from again — the right trade for a target
+# this is a released, immutable image, not a dev loop.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --no-cache
 
 # The application. `fixtures/` and `scenarios/` are copied because they are NOT package data
 # (see gap 3 above) and `agentdx run fixtures/code_pipeline` resolves that argument as a
@@ -132,7 +157,10 @@ COPY fixtures/ ./fixtures/
 COPY scenarios/ ./scenarios/
 COPY agentdx.toml README.md LICENSE ./
 
-RUN uv sync --frozen --no-dev
+# `--no-cache` again, same reason as the dependency-layer sync above — this second sync adds
+# only the project package itself on top of the already-installed dependency closure, but would
+# otherwise write its own (smaller, still non-zero) cache entry into this layer too.
+RUN uv sync --frozen --no-dev --no-cache
 
 # PRD §39.4's intended destination for the built frontend. The mount that would serve it
 # does not exist yet (gap 2) — this copy is what makes the asset present in the image, not

@@ -77,6 +77,7 @@ __all__ = [
     "OpenedRun",
     "RunAlreadyExistsError",
     "RunIdCollisionError",
+    "RunIdReuseDisabledError",
     "build_cache",
     "build_cache_hook",
     "build_fault_hooks",
@@ -149,6 +150,43 @@ class RunIdCollisionError(RuntimeError):
             "a genuine run_id hash collision between two different inputs, extremely "
             "unlikely but real (see runtime.scheduler.make_run_id); refusing to silently "
             "reuse a different run's stored verdict"
+        )
+        super().__init__(msg)
+
+
+class RunIdReuseDisabledError(RuntimeError):
+    """`open_run` found a sealed `run_id` match, but this host has reuse disabled.
+
+    D-88 (CONTEXT.md §9, ruled 2026-09-07, addendum 2026-09-08): `RunAlreadyExistsError`'s own
+    reuse guarantee rests on I1 — "identical `(seed, scenario_hash, graph_hash)` inputs always
+    produce byte-identical output" — which is true for an ordinary `agentdx run`, but false for
+    an `explore()`-driven caller. `explore()` (PRD §15.3) sweeps many distinct `delay_schedule`s
+    at one fixed seed, and `run_id` (`runtime.scheduler.make_run_id`) has no `delay_schedule`
+    component at all — every schedule in the sweep hashes to the *same* `run_id`. Under ordinary
+    `RunAlreadyExistsError` reuse semantics, the second and later schedules in a sweep would
+    silently print the *first* schedule's stored result as if it were their own: a fabricated
+    finding, not a real one (an I9 violation), with no error and exit 0.
+
+    An OP-2 audit (`op2-audit-p13.md` finding #2) demonstrated this live: 2 of 3
+    `explore()`-driven executions at a fixed seed were silently "reused" from cache. No shipped
+    code path calls `CliRunHost` from `explore()` yet — this class exists so that whichever
+    future prompt wires that path has a safe, load-bearing primitive to build on rather than
+    inheriting the D-80 reuse assumption by default and re-discovering this the same way.
+
+    Pass `CliRunHost(..., bypass_run_id_reuse=True)` to get this behavior instead of
+    `RunAlreadyExistsError`. The caller (not this class) is responsible for then choosing a
+    `run_id` that actually disambiguates by `delay_schedule` before retrying — this error only
+    stops the silent-fabrication failure mode, it does not by itself make repeated calls work.
+    """
+
+    def __init__(self, record: RunRecord) -> None:
+        """Carry the existing, sealed `RunRecord` that blocked this run — same shape as
+        `RunAlreadyExistsError`, so a caller catching both can inspect either identically."""
+        self.record = record
+        msg = (
+            f"run {record.run_id!r} already exists and is sealed, but this host was built with "
+            "bypass_run_id_reuse=True (D-88) -- refusing to silently reuse it. The caller must "
+            "supply a run_id that disambiguates by delay_schedule before retrying."
         )
         super().__init__(msg)
 
@@ -233,6 +271,7 @@ class CliRunHost:
         cache: Cache | None = None,
         model: str = "unspecified",
         provider_host: str = "offline",
+        bypass_run_id_reuse: bool = False,
     ) -> None:
         """Bind to one run's already-constructed runtime services.
 
@@ -242,6 +281,11 @@ class CliRunHost:
         ("always empty"), which would silently turn every replay-mode run into a
         guaranteed cache miss (exit 3) regardless of what is on disk. Optional only so a
         caller with no LLM surface at all (a pure-Python fixture) is not forced to build one.
+
+        `bypass_run_id_reuse` (D-88, CONTEXT.md §9): `False` for every caller today (`agentdx
+        run`'s own D-80 reuse behavior, unchanged). Set `True` only from an `explore()`-driven
+        caller — see `RunIdReuseDisabledError`'s own docstring for why a sealed `run_id` match
+        must never be silently reused in that one context.
         """
         self._run_id = run_id
         self._seed = seed
@@ -259,6 +303,7 @@ class CliRunHost:
         self._cache = cache
         self._model = model
         self._provider_host = provider_host
+        self._bypass_run_id_reuse = bypass_run_id_reuse
         self._opened: OpenedRun | None = None
 
     @property
@@ -296,9 +341,12 @@ class CliRunHost:
 
         Raises:
             RunAlreadyExistsError: `run_id` collides with an already-sealed run for the
-                identical `(seed, scenario_hash, graph_hash)` — safe to reuse by I1.
+                identical `(seed, scenario_hash, graph_hash)` — safe to reuse by I1. Only when
+                `bypass_run_id_reuse=False` (every caller today except an `explore()`-driven one).
             RunIdCollisionError: `run_id` collides with an already-sealed run for *different*
                 inputs — a genuine hash collision, must never be reused.
+            RunIdReuseDisabledError: same match as `RunAlreadyExistsError`, but this host was
+                built with `bypass_run_id_reuse=True` — see D-88 and that error's own docstring.
         """
         resolved_seed = self._seed if seed is None else seed
         existing = self._store.get_run(self._run_id)
@@ -315,6 +363,8 @@ class CliRunHost:
                         graph_hash=self._graph_hash,
                         seed=resolved_seed,
                     )
+                if self._bypass_run_id_reuse:
+                    raise RunIdReuseDisabledError(existing)
                 raise RunAlreadyExistsError(existing)
             self._store.discard_orphan_run(self._run_id)
         started_at = _started_at_utc()

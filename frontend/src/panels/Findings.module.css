@@ -93,7 +93,7 @@
   text-align: left;
   background: var(--elevation-raised);
   border: 1.5px solid var(--elevation-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   padding: var(--space-2) var(--space-3);
   color: var(--cream);
   cursor: pointer;
@@ -111,6 +111,10 @@
 
 .rowSuppressed {
   opacity: 0.7;
+  /* The suppressed-drawer row has no `.rowEvidence` sibling below it (it renders no
+   * `EvidenceLink`, so it never needed today's DOM split) — restore all four corners rather
+   * than inheriting `.row`'s now-top-only radius, which exists specifically for the split. */
+  border-radius: var(--radius-md);
 }
 
 .rowTop {
@@ -135,8 +139,18 @@
   color: var(--sage);
 }
 
+/* A sibling of `.row`'s <button> now, not a descendant (fixed 2026-09-08, D-94 — see
+ * `FindingRow`'s own comment for why: a real <button> must never contain another real <button>,
+ * WCAG's nested-interactive rule). Negative top margin plus matching side padding/no top border
+ * on `.row` visually reattaches it to the card above so the split reads as one row, not two. */
 .rowEvidence {
   cursor: default;
+  margin-top: calc(-1 * var(--space-1));
+  padding: 0 var(--space-3) var(--space-2);
+  background: var(--elevation-raised);
+  border: 1.5px solid var(--elevation-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
 
 .rowRecommendation {

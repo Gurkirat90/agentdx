@@ -42,6 +42,21 @@ difference between "the demo is too slow" and "the demo does not work" is the en
 diagnostic value of running it, and that diagnostic behavior is unchanged now that the
 underlying failure is gone.
 
+**Update 2026-09-08: teardown is now self-verifying, not just self-reported.** An independent
+audit (``op2-audit-docker-cold-start.md`` Finding #1) found ``_go_cold``'s ``docker compose
+down`` discarded its own exit code, so a teardown that did not fully succeed was invisible --
+and the same day, live, that exact gap broke a real run (``Network agentdx-g10_default ...
+already exists`` / ``Container agentdx-g10-seed-1 ... already in use``, left behind by an
+outer timeout killing a prior invocation mid-``up``). ``_go_cold`` now calls ``_teardown_ok()``
+after ``docker compose down`` and, if the project's containers or its default network
+survived, escalates to ``_force_teardown()`` before proceeding -- and raises ``CannotMeasure``
+with a concrete, actionable diagnostic if even that does not clear it, rather than letting a
+doomed ``docker compose up`` fail downstream with a confusing naming conflict. Unverified by
+this change itself: no environment available while writing this fix had a Docker daemon to
+actually exercise the new code path against (this is the same standing constraint the rest of
+this project's benchmark harnesses disclose) -- the next real cold run on a Docker host is
+what proves it, not this diff alone.
+
 Rule E1: the JSON this writes is the file every published cold-start number must cite with a
 ``[bench:docker-cold-start.json]`` marker.
 
@@ -246,12 +261,72 @@ def _remove_base_images() -> None:
         )
 
 
+def _teardown_ok() -> bool:
+    """Return whether the compose project is actually gone, not merely whether `docker
+    compose down` claimed to succeed.
+
+    `_compose("down", ...)` runs with `check=False` by design (a teardown that hard-crashed
+    the harness on a routine daemon hiccup would be worse than the harness itself) but that
+    means its exit code alone cannot be trusted to mean "the project is really torn down" --
+    this checks the two things a leftover teardown actually collides on: containers and the
+    project's default network.
+    """
+    containers = _compose("ps", "-aq")
+    if containers.returncode == 0 and containers.stdout.strip():
+        return False
+    network = subprocess.run(  # noqa: S603,S607
+        ["docker", "network", "inspect", f"{COMPOSE_PROJECT}_default"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return network.returncode != 0  # non-zero means "no such network" -- gone, as wanted
+
+
+def _force_teardown() -> None:
+    """Belt-and-suspenders cleanup for when `docker compose down` alone did not fully work.
+
+    **Observed live, 2026-09-08, not a hypothetical.** A prior invocation of this harness was
+    killed mid-run by an *outer* timeout (`just acceptance`'s own 200s subprocess wrapper)
+    while `docker compose up -d --build` was in flight. Because `-d` detaches, the containers
+    it had already created kept running, orphaned from the process tree that would otherwise
+    have torn them down on exit -- and the *next* invocation's own `docker compose down`
+    (`_go_cold`'s first line) did not remove them either, so the run after *that* failed
+    outright: `Network agentdx-g10_default ... already exists` / `Container
+    agentdx-g10-seed-1 ... already in use`. This is exactly the gap the independent audit
+    (`op2-audit-docker-cold-start.md` Finding #1, same day) predicted from reading the code
+    alone, before this ever actually happened: a discarded teardown exit code is invisible
+    right up until it breaks a *later*, unrelated-looking run. This function is the fallback
+    `_go_cold` reaches for once `_teardown_ok()` reports the ordinary teardown did not work:
+    remove any surviving containers directly by id, then the project's own default network by
+    name -- narrower and more forceful than `docker compose down`, which apparently is not
+    always sufficient on its own after an unclean prior exit.
+    """
+    containers = _compose("ps", "-aq")
+    ids = [line for line in containers.stdout.strip().splitlines() if line]
+    if ids:
+        subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, text=True, check=False)  # noqa: S603,S607
+    subprocess.run(  # noqa: S603,S607
+        ["docker", "network", "rm", f"{COMPOSE_PROJECT}_default"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def _go_cold(*, pull_cold: bool = False) -> None:
     """Remove every cached artefact this measurement must not benefit from.
 
     Guarantees: on return, the compose project has no containers, no volumes and no locally
     built image, the builder cache is empty, and the bind-mount data directory is gone. This
     runs *before* the clock starts, so its own cost is never counted.
+
+    Raises:
+        CannotMeasure: teardown still did not succeed after the `_force_teardown()` fallback
+            -- something is holding the project's containers or network open that this
+            harness cannot clear on its own (a stuck daemon, a process outside this harness
+            attached to the same resources). Reported as unmeasurable rather than let a
+            doomed `docker compose up` fail downstream with a confusing naming conflict.
 
     **What this does NOT remove by default: the pulled base images.** `docker builder prune`
     empties the build cache; base images live in the image store and survive it. Two cold
@@ -270,6 +345,16 @@ def _go_cold(*, pull_cold: bool = False) -> None:
     never be cited as the gate.
     """
     _compose("down", "-v", "--rmi", "local", "--remove-orphans")
+    if not _teardown_ok():
+        _force_teardown()
+        if not _teardown_ok():
+            raise CannotMeasure(
+                "the compose project's containers or its default network survived teardown "
+                f"even after a forced cleanup. Run `docker compose -p {COMPOSE_PROJECT} down "
+                f"-v --remove-orphans && docker network rm {COMPOSE_PROJECT}_default` by hand "
+                "and inspect what is still holding them open (`docker ps -a`, `docker network "
+                "ls`) before re-running this harness."
+            )
     if pull_cold:
         _remove_base_images()
     subprocess.run(
@@ -312,14 +397,41 @@ def _seed_exit_code() -> int | None:
     listing = _compose("ps", "-a", "--format", "json", "seed")
     if listing.returncode != 0 or not listing.stdout.strip():
         return None
-    for line in listing.stdout.strip().splitlines():
+    stdout = listing.stdout.strip()
+
+    def _exit_code_of(record: object) -> int | None:
+        if isinstance(record, dict) and "ExitCode" in record:
+            code = record["ExitCode"]
+            return int(code) if isinstance(code, (int, str)) else None
+        return None
+
+    # Finding #3 (LOW, op2-audit-docker-cold-start.md, repaired 2026-09-08): `docker compose
+    # ps --format json` emits one JSON object per line (NDJSON) on the Compose v2 build this
+    # was written and verified against -- but that shape is not guaranteed across every
+    # Compose CLI version; some have emitted a single JSON array instead, which would fail
+    # every per-line `json.loads` below and silently return None with no warning, quietly
+    # defeating `_diagnose_seed`'s whole point on a future run using a different Compose
+    # build. Try the per-line NDJSON reading first (the observed, common case); fall back to
+    # parsing the whole output as one JSON value (an array of records, or a single record) if
+    # that yields nothing, rather than assuming NDJSON is the only shape this will ever see.
+    for line in stdout.splitlines():
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(record, dict) and "ExitCode" in record:
-            code = record["ExitCode"]
-            return int(code) if isinstance(code, (int, str)) else None
+        code = _exit_code_of(record)
+        if code is not None:
+            return code
+
+    try:
+        whole = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    records = whole if isinstance(whole, list) else [whole]
+    for record in records:
+        code = _exit_code_of(record)
+        if code is not None:
+            return code
     return None
 
 
@@ -396,7 +508,24 @@ def measure(
     outcome.base_images_present = _base_images_present()
 
     started = time.monotonic()
-    up = _compose("up", "-d", "--build", timeout=threshold_s * 3)
+    try:
+        up = _compose("up", "-d", "--build", timeout=threshold_s * 3)
+    except subprocess.TimeoutExpired:
+        # Finding #2 (LOW, op2-audit-docker-cold-start.md, repaired 2026-09-08): this call had
+        # no `except subprocess.TimeoutExpired` anywhere in `measure()`/`main()`, so a build
+        # that hung past `threshold_s * 3` (540s at the default) crashed the process with a raw
+        # Python traceback instead of the graceful, diagnosable FAIL this harness exists to
+        # produce for every other failure mode. Caught here the same way `up.returncode != 0`
+        # is handled just below -- a real, reported `failed_step`, not a crash.
+        outcome.build_and_up_s = round(time.monotonic() - started, 3)
+        outcome.failed_step = "compose_up_timeout"
+        outcome.detail = (
+            f"`docker compose up -d --build` did not finish within its own "
+            f"{threshold_s * 3}s ceiling ({threshold_s}s threshold x3) -- the process was "
+            "killed rather than left to hang. This is a genuinely stuck build/daemon, not the "
+            "gate's own 180s threshold (which this never even reached)."
+        )
+        return outcome
     outcome.build_and_up_s = round(time.monotonic() - started, 3)
 
     if up.returncode != 0:
@@ -410,10 +539,23 @@ def measure(
         outcome.log_tail = _log_tail()
         return outcome
 
-    # Poll both halves of the criterion until the threshold elapses. Health is recorded the
-    # first time it answers; the clock keeps running until the run list is populated too.
+    # Poll both halves of the criterion. Runs at least once even if `build_and_up_s` alone
+    # already exceeded the threshold -- observed live, 2026-09-08 (215.512s build, 180s
+    # threshold): with the old `while time.monotonic() < deadline` loop, that condition was
+    # already false before the loop's first iteration, so /api/health was never polled even
+    # once and the harness reported `healthy: False` with the misleading detail "never
+    # returned 200 within Ns" -- misleading because it was never actually checked, not because
+    # it was checked and failed. `docker compose up -d --build` returns once containers
+    # *start*, not once Docker's own HEALTHCHECK passes, and `seed` already ran to completion
+    # as an upstream `depends_on` dependency -- so the server may well already be healthy and
+    # populated by the time `up` returns, even on a run that is going to fail the gate on time
+    # alone. This harness's own stated guarantee ("every field... reflects only what was
+    # observed, not filled with a plausible value") applies to `healthy`/`populated` too: a
+    # do-while shape guarantees at least one real check before giving up, so those fields
+    # report what is actually true, not just "unreached branch's default."
     deadline = started + threshold_s
-    while time.monotonic() < deadline:
+    build_exceeded_threshold_alone = outcome.build_and_up_s >= threshold_s
+    while True:
         now = time.monotonic() - started
         if not outcome.healthy and _http_json(HEALTH_URL) is not None:
             outcome.healthy = True
@@ -427,6 +569,8 @@ def measure(
                     outcome.run_count = len(runs)
                     outcome.populated_at_s = round(time.monotonic() - started, 3)
                     break
+        if time.monotonic() >= deadline:
+            break
         time.sleep(POLL_INTERVAL_S)
 
     outcome.seed_exit_code = _seed_exit_code()
@@ -434,7 +578,17 @@ def measure(
 
     if not outcome.healthy:
         outcome.failed_step = "health"
-        outcome.detail = f"/api/health never returned 200 within {threshold_s}s"
+        if build_exceeded_threshold_alone:
+            outcome.detail = (
+                f"`docker compose up -d --build` alone took {outcome.build_and_up_s}s, "
+                f"already over the {threshold_s}s threshold, before /api/health was polled "
+                "even once -- the one check this harness still performed after the fact found "
+                "it not yet answering either. This is a slow build, not a hung or unhealthy "
+                "server; `build_and_up_wall_s` in the result file is the number that explains "
+                "this failure, not this step."
+            )
+        else:
+            outcome.detail = f"/api/health never returned 200 within {threshold_s}s"
     elif not outcome.populated:
         outcome.failed_step = "populated_run_list"
         outcome.detail = (
@@ -583,7 +737,16 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.write(f"  results         : {RESULTS_PATH.relative_to(REPO_ROOT)}\n")
 
     if not args.keep_up:
+        # Same `down` -> verify -> force pattern `_go_cold` uses, applied to this run's own
+        # exit cleanup. This is what stands between a normal exit and leaving the *next*
+        # invocation to hit 2026-09-08's real "Network ... already exists" failure -- see
+        # `_force_teardown`'s docstring for the full account of how that happened. Best-effort
+        # only: no `CannotMeasure` here, since this run's own result is already decided and
+        # written; a leftover state at this point is the *next* run's `_go_cold` problem to
+        # catch and report, not this one's to fail on.
         _compose("down", "-v", "--remove-orphans")
+        if not _teardown_ok():
+            _force_teardown()
 
     return 0 if outcome.met else EXIT_NOT_MET
 

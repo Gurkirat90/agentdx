@@ -1,8 +1,14 @@
 {
+  "base_images_present": [],
+  "base_images_pulled_this_run": [
+    "node:20-bookworm-slim",
+    "python:3.12-slim-bookworm",
+    "ghcr.io/astral-sh/uv:0.5.11"
+  ],
   "benchmark": "docker-cold-start",
   "cold_cache": true,
   "criterion": "PRD \u00a744.1 G10: `docker compose up` reaches a healthy /api/health AND a populated run list, cold cache, arm64, under the threshold.",
-  "detail": "`docker compose up -d --build` exited 1 after 106.342s. Exit 5: an internal error. This is the exit code D-62's scheduler deadlock surfaces as \u2014 nothing in sdk/ calls Scheduler.spawn() (zero hits against a spawn defined at runtime/scheduler.py:752). NOTE: earlier revisions of this string said 'LangGraph's parallel fan-out has no runnable task'. d62-design.md \u00a73 downgrades that to a hypothesis \u2014 _resume_task grants one event-loop tick per resumption and recognises only scheduler-created Futures as suspension, so any await needing more than one tick deadlocks regardless of concurrency. Fan-out may be incidental. Check the log_tail's wait_reason: empty means no yield point was ever reached. stderr tail:  Container agentdx-g10-seed-1 Starting  |  Container agentdx-g10-seed-1 Started  |  Container agentdx-g10-seed-1 Waiting  |  Container agentdx-g10-seed-1 Error service \"seed\" didn't complete successfully: exit 5 | service \"seed\" didn't complete successfully: exit 5",
+  "detail": "`docker compose up -d --build` alone took 231.94s, already over the 180.0s threshold, before /api/health was polled even once -- the one check this harness still performed after the fact found it not yet answering either. This is a slow build, not a hung or unhealthy server; `build_and_up_wall_s` in the result file is the number that explains this failure, not this step.",
   "environment": {
     "arch_conformant": true,
     "implementation": "CPython",
@@ -10,24 +16,33 @@
     "python": "3.12.2",
     "system": "Darwin"
   },
-  "failed_step": "compose_up",
+  "failed_step": "health",
   "gate": "G10",
   "gate_status": "Pass/fail against the threshold is the claim. The exact second counts are real wall-clock measurements of a container build and will vary with machine, disk, and registry latency; never quote a fixed digit from this file as a permanent fact in CONTEXT.md or the README \u2014 cite the file. Same discipline as D-68.",
   "healthy": false,
   "is_gate_conformant_run": true,
   "log_tail": [
-    "seed-1  | \u2717 DeadlockError('[E-SCHED-003] deadlock: no task is runnable and none is blocked on a timer. Wait reasons: {t_r_50f3b6_root_0: } (docs/determinism-guarantees.md#e-sched-003)')",
-    "seed-1  | code_pipeline: failed",
+    "seed-1  | code_pipeline: passed",
+    "seed-1  |   run_id: r_90b839e6",
+    "seed-1  |   verdict: state_conflict_risk (confidence low)",
+    "seed-1  | Bounded search: absence of findings is not proof of absence.",
+    "seed-1  | support_triage: passed",
+    "seed-1  |   run_id: r_59bb009e",
+    "seed-1  |   verdict: insufficient_data (confidence low)",
+    "seed-1  | Bounded search: absence of findings is not proof of absence.",
+    "seed-1  | research_fanout: passed",
+    "seed-1  |   run_id: r_e388370e",
+    "seed-1  |   verdict: insufficient_data (confidence low)",
     "seed-1  | Bounded search: absence of findings is not proof of absence."
   ],
   "met": false,
   "method": "Containers, volumes, the locally built image and the whole builder cache were removed, and the bind-mount data directory deleted, before the clock started; that teardown is excluded from the timed window. The timer starts at `docker compose up -d --build` and stops the first poll at which /api/health answers 200 AND /api/runs returns a non-empty runs array. Both halves are required \u2014 health alone is not the gate.",
   "populated": false,
   "run_count": 0,
-  "seed_exit_code": 5,
+  "seed_exit_code": 0,
   "threshold_s": 180.0,
   "timings_wall_s": {
-    "build_and_up_wall_s": 106.342,
+    "build_and_up_wall_s": 231.94,
     "healthy_at_wall_s": null,
     "populated_at_wall_s": null
   }

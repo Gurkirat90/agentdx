@@ -12,8 +12,11 @@ PRD §39.6 step 2 — "CI must be green, including the determinism suite and the
 — was **half** satisfied as of 2026-09-01 (CI spine green, acceptance gates not) and is
 substantially more satisfied as of **2026-09-07**: the blocking acceptance-gate subset (G1–G7,
 G9 — see [Release readiness](#release-readiness) for what "blocking" means here) is now green
-too, on real hardware. Two gates remain open, both for environment reasons rather than code
-defects. See [Release readiness](#release-readiness).
+too, on real hardware. **Update, 2026-09-08:** G10 also now has a real, cold, gate-conformant
+PASS (`bench/results/docker-cold-start.json`, `CONTEXT.md` D-93) — it is no longer blocked on
+"no environment can measure it," the reason this file gave as recently as 2026-09-07. Two gates
+remain open (G8, G10), both now for the same reason — no independent OP-2 audit has confirmed
+either yet — not for environment or code defects. See [Release readiness](#release-readiness).
 
 ---
 
@@ -89,26 +92,37 @@ workflows/ci.yml`'s `acceptance` job depends on: **G1, G2, G3, G4, G5, G6, G7 an
 the ten PRD §44.1 gates — are now green**, each with a real dated run in `CONTEXT.md` §6, which
 remains the authoritative table this file does not duplicate.
 
-Two gates are still open, for reasons that are now environmental rather than code defects:
+Two gates are still open — as of 2026-09-08, both for the same reason (no independent OP-2 audit
+yet), not for environment or code defects:
 
 - **G8** (Control Tower end-to-end) has a real, passing test path, but no independent OP-2 audit
   has run against the P16 surface it exercises yet — so it stays informational (`continue-on-
   error: true` in CI) rather than blocking, on the same "no self-reported greens" standard this
   project applies everywhere else.
-- **G10** (Docker cold-start under 180s) needs a real Docker daemon on the fix having landed,
-  which no environment available to this project currently provides — `ubuntu-latest` GitHub
-  runners are x86_64, and this project's own sandbox has no Docker daemon at all. The harness
-  (`bench/harness/docker_cold_start.py`) is real and has run once, warm, 2026-08-29, before D-62
-  closed; that run is stale evidence now, not current evidence of failure.
+- **G10** (Docker cold-start under 180s) — **update, 2026-09-08**: this no longer needs "an
+  environment this project doesn't have." On the owner's own machine, `bench/harness/
+  docker_cold_start.py` ran a genuinely cold `docker compose up -d --build` (containers, volumes,
+  the built image, the whole builder cache, and the data bind-mount all removed before the clock
+  started) and reached a healthy `/api/health` AND a populated `/api/runs` in 67.308 s / 68.409 s
+  against the 180 s threshold — `cold_cache: true`, `met: true`, `is_gate_conformant_run: true`
+  (`bench/results/docker-cold-start.json`; full account in `CONTEXT.md` D-93 and §6 row 192). The
+  text this replaced cited a stale 2026-08-29 *warm* run as the only evidence. What is still
+  genuinely true: `ubuntu-latest` GitHub Actions runners are x86_64, so this arm64 measurement
+  has not been (and cannot directly be) reproduced *in CI*, only on real hardware run by hand —
+  and no independent OP-2 has audited this run yet, so it stays informational in CI for that
+  reason now, not because it can't be measured.
 
 CI (`.github/workflows/ci.yml`) reflects exactly this split: G1–G7 and G9 are a blocking step,
 G8 and G10 are a `continue-on-error` step, filtered with `just acceptance "g1_ or g2_ or ... or
 g9_"` / `"g8_ or g10"` — the trailing underscore matters, because `"g1"` is a substring of
 `"g10"` and an unanchored filter would silently double-count. `.github/workflows/release.yml`
-gates a release on the same eight-gate blocking subset, not the full ten, for the same reason:
-requiring G8 or G10 would make a release perpetually impossible on the infrastructure available.
-That is a judgment call, documented as one in the workflow file's own header comment, not a
-silent lowering of the bar.
+gates a release on the same eight-gate blocking subset, not the full ten. The original reasoning
+here — "requiring G8 or G10 would make a release perpetually impossible on the infrastructure
+available" — is now only half true: G10 **is** measurable, just not inside GitHub's own runners,
+so folding it into the blocking set would mean either accepting an arm64-only, hand-run gate or
+provisioning self-hosted arm64 CI. That is a real option now, not a dead end, and whether to take
+it is an owner decision this file does not make (see `CONTEXT.md` D-93). G8's exclusion is
+unaffected by any of this — it is waiting on an audit, not an environment.
 
 ---
 
@@ -194,22 +208,28 @@ silent lowering of the bar.
 Stated here rather than in a commit message, because the commit message is not what a reader of
 this file will find:
 
-- **The `Dockerfile` and `docker-compose.yml` have been built and run once, warm, on
-  Darwin/arm64, 2026-08-29** — see `bench/results/docker-cold-start.json`, which carries the
-  `seed` service's real `E-SCHED-003` traceback and `seed_exit_code: 5`. That run confirms the
-  image builds and the compose graph wires up; it does **not** confirm a cold build (it was
-  taken with `--no-prune`, so `cold_cache` is `false` and no G10-conformant number exists yet),
-  and it does not confirm the §39.4 image-size target, which has never been measured.
+- ~~The `Dockerfile` and `docker-compose.yml` have been built and run once, warm, on
+  Darwin/arm64, 2026-08-29 — confirms the image builds and the compose graph wires up, but not a
+  cold build and not the §39.4 image-size target.~~ **Updated 2026-09-08**: a genuinely cold run
+  now exists and passes — `bench/results/docker-cold-start.json` (`cold_cache: true`, `met: true`,
+  67.308 s build+up / 68.409 s populated against the 180 s threshold; `CONTEXT.md` D-93/§6 row
+  192). Still open: the §39.4 sub-500MB image-size target has never been measured at all, and one
+  earlier attempt this same session failed the full harness for a reason never root-caused beyond
+  "likely transient" (see D-93) — worth a second cold confirmation before treating this as fully
+  settled.
 - **`docker-compose.yml`'s bind mount is unexercised on Linux.** `./.agentdx-data:/data` is
   written by uid 10001 inside the container; the build-time `chown` is shadowed by the mount at
   runtime. Docker Desktop on macOS remaps ownership and hides this, and the one run above was on
   Darwin. On Linux — a `CONTEXT.md` §3 supported platform — this may fail with EACCES.
 - ~~The image bakes the built frontend into `src/agentdx/api/static/`, but nothing serves
-  it.~~ **Closed 2026-09-07** — see `api/app.py`'s SPA-fallback mount under Added above. What
-  is still open: this has been verified by test suite and manual routing-logic review, not by
-  an actual `docker compose up` (no Docker daemon in this project's sandbox — the same
-  limitation the D-62/G10 items above describe), so the image-level "no Node requirement" claim
-  in PRD §39.4 remains code-verified rather than container-verified.
+  it.~~ **Closed 2026-09-07** — see `api/app.py`'s SPA-fallback mount under Added above. **Partly
+  container-verified as of 2026-09-08**: a real `docker compose up` now runs (see the cold G10
+  item above), so "no Docker daemon exists in any environment available to this project" is no
+  longer the limitation. What is still open: the cold-start harness's own health check only
+  requests `/api/health` and `/api/runs`, never `/` or a static asset path, so the SPA-fallback
+  route itself — as opposed to the API — remains code-verified (tests + manual review) rather
+  than container-verified. A `curl` of `/` against the running container would close this; not
+  yet done.
 - **PRD §39.2's compose block sets `AGENTDX_MODE` and `AGENTDX_DATA_DIR`, neither of which
   exists.** The real environment contract is `AGENTDX_<SECTION>_<KEY>` (`config.py`), so both of
   the PRD's names are silently ignored — they do not even error, because the unknown-key check
@@ -227,6 +247,10 @@ this file will find:
   workflow's publish step can succeed even once a tag is pushed.
 - No OpenTelemetry export (PRD §30, FR-13). It is scope-cut #5 and conditional on G1–G10 being
   green.
-- No `README.md` rewrite and no ghost-baseline GIF. The GIF is a recording of the demo, and the
-  demo does not run (D-62). A screenshot of a state the product cannot currently reach would be
-  the most misleading artefact in the repository.
+- ~~No `README.md` rewrite and no ghost-baseline GIF. The GIF is a recording of the demo, and
+  the demo does not run (D-62).~~ **Premise stale as of 2026-09-08**: D-62 closed 2026-09-03,
+  and the demo now genuinely runs end to end — confirmed both by G9 on real hardware and, as of
+  this session, by a real cold `docker compose up` reaching a populated run list (G10, D-93). The
+  README rewrite and the ghost-baseline GIF are therefore no longer blocked by "the product can't
+  get there" — they are simply not yet done. Recording one is real, undone work, not a
+  contradiction to route around.

@@ -234,12 +234,17 @@ def test_g3_deterministic_replay_100_of_100() -> None:
     no system-wide Python >=3.11, so the child hits `ModuleNotFoundError: No module named
     'tomllib'` before it can even attempt the replay — an environment artifact confirmed
     by inspecting the captured subprocess stderr, not a product defect. Expected to pass
-    in the real CI job, which runs Python 3.12 project-wide. `min_pytest_passed=1` (added
-    2026-08-29, see `_run_gate`'s own docstring) additionally requires at least one real
-    pytest pass, so a silently-all-skipped run cannot report this never-waived gate PASS
-    on exit code alone.
+    in the real CI job, which runs Python 3.12 project-wide. `min_pytest_passed=3` (raised
+    from `1`, 2026-09-08, D-94 — an independent OP-2 audit of this gate,
+    `op2-audit-g3-g5.md`, found `min_pytest_passed=1` let a regression in 2 of this file's
+    3 DoD tests still report a mechanised PASS, as long as the first kept passing) now
+    requires **all three** of this file's own declared DEFINITION OF DONE tests to pass —
+    100/100 same-seed replay, same-seed decision-sequence match, and different-seed
+    divergence — not merely one of them. This closes tripwire 19 all the way to this file's
+    own stated DoD, not just to "not literally zero," matching the standard this gate's
+    never-waived status calls for.
     """
-    _run_gate("G3", ["pytest", "tests/determinism/test_replay_equality.py"], min_pytest_passed=1)
+    _run_gate("G3", ["pytest", "tests/determinism/test_replay_equality.py"], min_pytest_passed=3)
 
 
 @pytest.mark.acceptance
@@ -264,8 +269,26 @@ def test_g4_fault_injection_reproduces_failure() -> None:
 
 @pytest.mark.acceptance
 def test_g5_critical_path_decomposition_invariant() -> None:
-    """PRD §44.1 G5: sum(six overhead buckets) + critical path = makespan, within +-2%."""
-    _run_gate("G5", ["pytest", "tests/analysis/test_decomposition_invariant.py"])
+    """PRD §44.1 G5: sum(six overhead buckets) + critical path = makespan, within +-2%.
+
+    `min_pytest_passed=4` (added 2026-09-08, D-94 — an independent OP-2 audit of this gate,
+    `op2-audit-g3-g5.md`) closes the same tripwire-19 gap G2/G3 already close and this gate
+    previously did not: before this, `_run_gate` was called with no floor at all, so a
+    silently-all-skipped run of this file would have reported G5 PASS on exit code alone.
+    `tests/analysis/test_decomposition_invariant.py` collects exactly 4 items (3 parametrized
+    cases of `test_decomposition_invariant_holds` over all three reference fixtures, plus
+    `test_every_bucket_traces_to_evidence_seq`), confirmed by direct collection count, so `4`
+    requires all of them, not merely "at least one." **Not addressed by this change** (out of
+    proportion for a floor-strictness fix, per D-89's own reasoning): the golden fixtures this
+    file loads are stamped by `ImmediateScheduler()`, not the real `Scheduler` `agentdx run`
+    uses today — see D-89 and D-94's G5-3 finding for the real, larger, deliberately-deferred
+    gap this gate still carries.
+    """
+    _run_gate(
+        "G5",
+        ["pytest", "tests/analysis/test_decomposition_invariant.py"],
+        min_pytest_passed=4,
+    )
 
 
 def _resolve_code_pipeline_run_id() -> str:
@@ -400,5 +423,25 @@ def test_g10_docker_demo_under_180s_cold() -> None:
     if `just`/`docker` themselves are missing — the environment gap this docstring describes
     is a step further than that: the tools exist, the fix landed, but nobody with a Docker
     daemon has run this since.
+
+    `timeout_s=800` (raised from `200`, 2026-09-08): a silent, zero-output 200s timeout hit
+    this gate live, twice, always specifically through `just acceptance`'s own outer wrapper
+    -- every standalone `just bench-docker-cold` run this same day (run directly, not through
+    this file) either passed cleanly or failed with a real, diagnosable error, never a bare
+    timeout. The arithmetic explains why: `docker_cold_start.py`'s own `docker compose up -d
+    --build` subprocess alone already gets `timeout=threshold_s*3` (540s at the default 180s
+    threshold) as a ceiling it treats as legitimate -- and a real, correctly-measured cold
+    build hit 215.512s in this same session, over a fifth of that ceiling on an ordinary run.
+    Add the harness's own unbounded teardown (`docker compose down`, `docker builder prune
+    -af`, neither has an explicit `timeout=`) and `just`/`uv` process startup on top, and 200s
+    was tighter than the inner harness's *own* accepted worst case, not a generous backstop
+    against a truly hung process. The consequence was worse than a slow gate: killing the
+    harness mid-`docker compose up -d --build` orphans its already-detached (`-d`) containers,
+    which is the exact mechanism D-94/`op2-audit-docker-cold-start.md` Finding #1 traced as
+    the root cause of a *later*, unrelated-looking run failing with a container/network name
+    conflict. Raising this outer timeout well past every inner sub-budget (540s build ceiling
+    + up to 180s poll + margin for teardown and process overhead) means it now only fires as a
+    real "something is hung" signal, never as a premature kill of a run that was going to
+    terminate and self-report on its own.
     """
-    _run_gate("G10", ["just", "bench-docker-cold"], timeout_s=200)
+    _run_gate("G10", ["just", "bench-docker-cold"], timeout_s=800)

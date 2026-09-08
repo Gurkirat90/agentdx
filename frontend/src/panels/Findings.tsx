@@ -194,6 +194,18 @@ function FindingRow({
   const seqs = evidenceEventSeqs(finding);
   const spanIds = evidenceSpanIds(finding);
 
+  // Structural fix, 2026-09-08 (D-94, `op2-audit-g3-g5.md`'s G8 rerun found a real axe-core
+  // "nested-interactive" WCAG violation here): this row used to be one <button> that contained
+  // EvidenceLink's own real <button> seq/span chips, papered over with a stopPropagation() that
+  // satisfies neither WCAG nor screen readers, since assistive tech cannot correctly convey
+  // interactive controls nested inside another interactive control. The interaction itself was
+  // already correct and is unchanged — "click the row to select this finding, click a seq/span
+  // chip to jump to that specific event instead" — only the DOM shape was invalid. Fixed by
+  // making the row-select <button> and the evidence chips DOM siblings instead of ancestor and
+  // descendant: the button wraps everything the row-select action should cover (classification,
+  // title, agents, recommendation — all non-interactive content), and `rowEvidence` moves out to
+  // sit alongside it, in the same place `ReproCommand` already sits as a sibling below the
+  // button — a pattern this file already used, not a new one invented for this fix.
   return (
     <li>
       <button
@@ -219,13 +231,13 @@ function FindingRow({
             {key !== null ? <span className={cx(styles.rowKey, 'numeric')}> · {key}</span> : null}
           </p>
         ) : null}
-        <div className={styles.rowEvidence} onClick={(e) => e.stopPropagation()}>
-          <EvidenceLink seqs={seqs} spanIds={spanIds} />
-        </div>
         {finding.recommendation !== null ? (
           <p className={styles.rowRecommendation}>{finding.recommendation}</p>
         ) : null}
       </button>
+      <div className={styles.rowEvidence}>
+        <EvidenceLink seqs={seqs} spanIds={spanIds} />
+      </div>
       <ReproCommand finding={finding} />
     </li>
   );

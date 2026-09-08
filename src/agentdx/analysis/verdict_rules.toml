@@ -83,9 +83,12 @@ medium_max_instrumentation_gaps = 2
 [verdict.recommendations]
 merge_edge_cp_share = 0.40
 merge_dst_productive_work_max = 0.25
-# fake_fanout_* are declared, not yet consumed: the fake-fan-out recommendation rule needs a
-# schedule-enumeration input `explore/` (P13) doesn't provide yet — see verdict.py's module
-# docstring "declared, not built" list. Values are the PRD's own numbers, ready to wire.
+# fake_fanout_* are declared, not yet consumed. Corrected 2026-09-08 (CONTEXT.md D-92 addendum):
+# this does NOT need explore/ or schedule enumeration — analysis.timing.parallelism_metrics()
+# already computes average_parallelism from a single run. What's actually missing is (a) a
+# branch/fan-out-degree count, which no analysis/ module computes today, and (b) the recommendation
+# rule itself in verdict.py (its `parallelism` param is accepted but not yet read by any rule).
+# Values below are the PRD's own numbers, ready to wire once both exist.
 fake_fanout_max_parallelism = 1.5
 fake_fanout_min_branches = 3
 orchestration_recommend_fraction = 0.15
