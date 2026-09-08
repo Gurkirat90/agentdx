@@ -141,6 +141,14 @@ detached container and causes the *next* run's naming-conflict failure (Finding 
 - [x] ~~Live-verify~~ — done, 2026-09-08: `just acceptance` → **10/10 gates PASS**, real, in
       one run. G10 clean. This item is closed.
 
+**Seventh attempt, same day: another slow build, worse than the sixth (494.43s vs 215.5s).**
+7 attempts today total: 2 clean (67.3s, 27.1s), 5 failures, the last two both "slow build, not
+hung/conflicted" and getting *worse* each time — consistent with cumulative Docker Desktop VM
+strain from repeated full daemon-wide cache wipes (`docker builder prune -af` each time), not a
+code regression (nothing changed between attempts 6 and 7). **Recommendation: stop running G10
+today.** Restart Docker Desktop or take a break before trusting the next measurement — the two
+genuinely clean early results (67.3s, 27.1s) are the more representative numbers right now.
+
 ## 2. Standing re-audit backlog
 
 Every module below had a first independent OP-2 audit, real findings, and a same-day repair —
