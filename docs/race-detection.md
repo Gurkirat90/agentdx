@@ -252,10 +252,14 @@ shape," which is exactly what it meant before 2026-08-19.
 6. **`tests/false_positives/` is scoped to the race-detection rows of PRD §33.9's table.** Three
    rows of that table — retry of the same tool call is not redundancy, ≥3-average-parallelism
    fan-out is not reported as fake fan-out, and a single-agent run has no coordination findings
-   — are the responsibility of `analysis.redundancy` and `analysis.verdict` respectively, both
-   already `BUILT` with their own dedicated test suites (`tests/analysis/test_redundancy.py`,
-   `tests/analysis/test_verdict.py`). Re-deriving those cases here would duplicate coverage
-   that already exists elsewhere under a different module's own gate, not close a real gap.
+   — are the responsibility of `analysis.redundancy` and `analysis.verdict` respectively, not
+   `race.py`'s. **Only the retry row actually has dedicated coverage** (D-92, `CONTEXT.md` §9,
+   2026-09-08, checked directly rather than trusted from an earlier version of this paragraph):
+   `test_redundancy.py::test_no_group_ever_links_a_retry` verifies it. The other two do not —
+   `VerdictClass` has no `SINGLE_AGENT` member, and no test or source file computes or asserts
+   the ≥3-average-parallelism claim. This paragraph previously read "already `BUILT` with their
+   own dedicated test suites" for all three rows; that was false for two of them. See D-92 for
+   the full account and why closing the gap needs a real design decision, not attempted here.
 
 **Net honest statement:** this build's race detector has verified precision = 1.0 against
 every case it has been tested against (its own true-positive matrix, guard suite, the

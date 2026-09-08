@@ -23,7 +23,12 @@ reduction report** — that is scope creep, not progress (CONTEXT.md §11.9b).
 
 **Scope note.** PRD §33.9's table has three rows this directory does not cover: retry-of-a-tool-
 -call-is-not-redundancy, ≥3-average-parallelism-is-not-fake-fan-out, and single-agent-run-has-no-
--coordination-findings. Those are `analysis.redundancy` and `analysis.verdict`'s own gates,
-already `BUILT` with their own dedicated suites (`tests/analysis/test_redundancy.py`,
-`tests/analysis/test_verdict.py`) — see `docs/race-detection.md`'s coverage statement for the
-full reasoning. This directory covers exactly the rows that are `race.py`'s own responsibility.
+-coordination-findings. These are `analysis.redundancy` and `analysis.verdict`'s own gates, not
+`race.py`'s — but **only the first of the three actually has dedicated coverage today** (D-92,
+`CONTEXT.md` §9, 2026-09-08): `test_redundancy.py::test_no_group_ever_links_a_retry` verifies the
+retry row directly. The other two do not — `analysis.verdict.VerdictClass` has no `SINGLE_AGENT`
+member at all, and no test or source file anywhere computes or asserts the ≥3-average-parallelism
+claim. This paragraph previously claimed all three were "already `BUILT` with their own dedicated
+test suites" — that was checked directly and found false for two of the three; see D-92 for the
+full account and why closing the gap is not attempted here. This directory still covers exactly
+the rows that are `race.py`'s own responsibility, correctly.
