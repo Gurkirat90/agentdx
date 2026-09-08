@@ -3,7 +3,13 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentdx"
+# PyPI distribution name only -- the CLI command (`agentdx`) and the import package
+# (`import agentdx`, `src/agentdx/`) are unaffected by this and stay exactly as they are
+# throughout the rest of the codebase. Changed from "agentdx" 2026-09-08: both "agentdx" and
+# "agentx" are already registered on PyPI by unrelated, real, actively-published projects (an
+# agent-diagnostics SDK and an agent-integration toolkit, respectively) -- checked directly on
+# pypi.org, not assumed. "agentdx007" was confirmed free the same way before choosing it.
+name = "agentdx007"
 version = "0.1.0"
 description = "Pre-deployment reliability and coordination debugger for multi-agent AI systems"
 readme = "README.md"

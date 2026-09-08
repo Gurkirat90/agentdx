@@ -24,7 +24,7 @@ refused, because that would silently replace recorded history.
 `cache/entries.jsonl.zst`. Zstd requires the `zstandard` distribution, which is outside the
 permitted dependency set (AGENTS.md §2, ADR-004's enumeration). The members are therefore
 `events.jsonl` and `cache/entries.jsonl`, compressed by the zip container itself with
-DEFLATE — the archive is still compressed, no dependency is added, `uv pip install agentdx`
+DEFLATE — the archive is still compressed, no dependency is added, `uv pip install agentdx007`
 stays compiler-free (NFR-16), and zstd inside a zip would have been double compression in
 any case. `manifest.json` records `compression` so a future zstd bundle is distinguishable
 rather than merely different.

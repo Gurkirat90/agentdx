@@ -70,7 +70,10 @@
 #   3. STILL OPEN. Fixtures are not package data. `[tool.hatch.build.targets.wheel]` packages
 #      `src/agentdx` only, and the committed fixture caches are `responses.json` files, not
 #      the "compressed SQLite files ... included as package data" §39.4 describes. So a
-#      `pip install agentdx` alone cannot run a fixture. This image copies the repository
+#      `pip install agentdx007` alone cannot run a fixture (PyPI name changed from "agentdx" to
+#      "agentdx007" 2026-09-08 -- both "agentdx" and "agentx" are owned by unrelated real
+#      projects on PyPI; the CLI command and import package are still `agentdx`, unaffected).
+#      This image copies the repository
 #      tree for that reason, rather than installing the wheel and hoping. Out of scope for
 #      this pass — a packaging change to `pyproject.toml`'s wheel target, not a Docker fix.
 
